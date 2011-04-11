@@ -701,7 +701,8 @@ private:
 
             const int result = ecrt_master_sdo_download(m_master, axis, index, subindex, reinterpret_cast<uint8_t*>(&val), val_size, &abort_code);
             if (result) {
-                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed. Key=") << axis << ":" << index << ":" << static_cast<uint16_t>(subindex)
+                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed. Key=") << axis << ":"
+                                      << index << ":" << static_cast<uint16_t>(subindex)
                                       << " = "
                                       << val << ":" << val_size << ", abort_code=" << abort_code);
             }
