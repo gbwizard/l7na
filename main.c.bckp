@@ -1,0 +1,248 @@
+#include <stdio.h>
+#include <unistd.h>
+
+#include "ecrt.h"
+
+/****************************************************************************/
+// EtherCAT
+// Перемещение в заданную позицию
+
+static ec_master_t*         gkMaster = NULL;
+static ec_master_state_t    gkMasterState = {};
+static ec_domain_t*         gkDomain1 = NULL;
+static ec_domain_state_t    gkDomain1State = {};
+static ec_slave_config_t*   gkSlaveStateDigOut = NULL;
+static ec_slave_config_t*   gkSlaveStateDigIn = NULL;
+/****************************************************************************/
+
+static uint8_t* gkDomain1PD = NULL;
+
+// offsets for PDO entries
+static unsigned int gkOffOControl;
+static unsigned int gkOffOPos;
+static unsigned int gkOffIStatus;
+static unsigned int gkOffIPos;
+
+const static ec_pdo_entry_reg_t domain1_regs[] = {
+    {0, 0, 0x00007595, 0x00000000, 0x6040, 0, &gkOffOControl},
+    {0, 0, 0x00007595, 0x00000000, 0x607a, 0, &gkOffOPos},
+    {0, 0, 0x00007595, 0x00000000, 0x6041, 0, &gkOffIStatus},
+    {0, 0, 0x00007595, 0x00000000, 0x6064, 0, &gkOffIPos},
+    {}
+};
+static char slaves_up = 0;
+
+/*****************************************************************************/
+void check_domain1_state() {
+    ec_domain_state_t ds;
+    ecrt_domain_state(gkDomain1, &ds);
+#if 0
+    if (ds.working_counter != gkDomain1State.working_counter)
+        printf("Domain1: WC %u.\n", ds.working_counter);
+    if (ds.wc_state != gkDomain1State.wc_state)
+        printf("Domain1: State %u.\n", ds.wc_state);
+#endif
+    gkDomain1State = ds;
+}
+
+/*****************************************************************************/
+void check_master_state() {
+    ec_master_state_t ms;
+    ecrt_master_state(gkMaster, &ms);
+    if (ms.slaves_responding != gkMasterState.slaves_responding)
+        printf("%u slave(s).\n", ms.slaves_responding);
+    if (ms.al_states != gkMasterState.al_states)
+        printf("AL states: 0x%02X.\n", ms.al_states);
+    if (ms.link_up != gkMasterState.link_up)
+        printf("Link is %s.\n", ms.link_up ? "up" : "down");
+    gkMasterState = ms;
+}
+
+/*****************************************************************************/
+void check_slave_config_states() {
+    ec_slave_config_state_t s;
+    ecrt_slave_config_state(gkSlaveStateDigOut, &s);
+    if (slaves_up < 1 && s.al_state != 0x08) {
+        printf("DigOut: State 0x%02X.\n", s.al_state);
+    }
+    if (slaves_up < 1 && s.al_state == 0x08) {
+        slaves_up = 1;
+    }
+    ecrt_slave_config_state(gkSlaveStateDigIn, &s);
+    if (slaves_up < 2 && s.al_state != 0x08) {
+        printf("DigIn: State 0x%02X.\n", s.al_state);
+    }
+    if (slaves_up < 2 && s.al_state == 0x08) {
+        slaves_up = 2;
+    }
+}
+
+/*****************************************************************************/
+int main(int argc, char **argv)
+{
+    unsigned int j, op_flag;
+    unsigned int ipos, istatus;
+    ec_slave_config_t *sc;
+    //ec_master_state_t ms;
+    int i;
+
+    gkMaster = ecrt_request_master(0);
+    if (!gkMaster)
+      { fprintf(stderr, "Unable to get requested master.\n");
+        return -1;
+      }
+
+    printf("Step1\n");
+
+    gkDomain1 = ecrt_master_create_domain(gkMaster);
+    if (!gkDomain1)
+      { fprintf(stderr, "Unable to create process data domain.\n");
+        return -1;
+      }
+    printf("Step2\n");
+
+    sc = ecrt_master_slave_config(gkMaster, 0, 0, 0x00007595, 0x00000000);
+    if (!sc) {
+      fprintf(stderr, "Failed to get l7n configuration.\n");
+      return -1;
+    }
+    printf("Step3\n");
+
+    if (ecrt_domain_reg_pdo_entry_list(gkDomain1, domain1_regs)) {
+        fprintf(stderr, "PDO entry registration failed!\n");
+        return -1;
+    }
+    printf("Step4\n");
+
+    printf("Activating master...");
+        if (ecrt_master_activate(gkMaster)) {
+          fprintf(stderr,"activation failed.\n");
+          return -1;
+        }
+    printf("Master ok!\n");
+
+    if (!(gkDomain1PD = ecrt_domain_data(gkDomain1))) {
+      fprintf(stderr,"Domain data initialization failed.\n");
+      return -1;
+    }
+    printf("Domain data registered ok.\n");
+
+    check_master_state();
+    check_domain1_state();
+
+    printf("Step5\n");
+
+    op_flag = 0;
+
+    //ждать режим OP
+    for(j = 0; ; j++) {
+        ecrt_master_receive(gkMaster);  //RECEIVE A FRAME
+        ecrt_domain_process(gkDomain1); //DETERMINE THE DATAGRAM STATES
+       // check_slave_config_states();
+       if (! op_flag) {
+          check_domain1_state();
+       }
+       if (gkDomain1State.wc_state == EC_WC_COMPLETE && !op_flag) {
+          printf("Domain is up at %d cycles.\n", j);
+          op_flag = 1;
+       }
+       ipos = EC_READ_U32(gkDomain1PD + gkOffIPos); //READ DATA 0x6064 position
+       istatus = EC_READ_U16(gkDomain1PD + gkOffIStatus); //READ DATA 0x6041 status
+
+       // send process data
+       ecrt_domain_queue(gkDomain1); //MARK THE DOMAIN DATA AS READY FOR EXCHANGE
+       ecrt_master_send(gkMaster);   //SEND ALL QUEUED DATAGRAMS
+       usleep(1000); //WAIT 1mS
+
+       if (op_flag) {
+            printf("1-Position: %d Status: 0x%x\n", ipos, istatus);
+            break;
+       }
+    }
+
+    if(argc > 1) {
+
+        //перейти в позицию
+        const int cmdpos = atoi(argv[1]);
+        unsigned int cmd;
+        unsigned int val;
+        printf("cmd pos: %d\n", cmdpos);
+
+        ecrt_master_receive(gkMaster);
+        ecrt_domain_process(gkDomain1);
+        cmd = 15;
+        EC_WRITE_U16(gkDomain1PD + gkOffOControl, cmd); //0x6040 ControlWord
+        ecrt_domain_queue(gkDomain1);
+        ecrt_master_send(gkMaster);
+        usleep(1000);
+
+        //wait
+        for (i = 0; i < 200; ++i) {
+            ecrt_master_receive(gkMaster);
+            ecrt_domain_process(gkDomain1);
+            ecrt_domain_queue(gkDomain1);
+            ecrt_master_send(gkMaster);
+            usleep(1000);
+        }
+
+        ecrt_master_receive(gkMaster);
+        ecrt_domain_process(gkDomain1);
+        val = cmdpos;
+        EC_WRITE_U32(gkDomain1PD + gkOffOPos, val);
+        ecrt_domain_queue(gkDomain1);
+        ecrt_master_send(gkMaster);
+        usleep(1000);
+
+        //wait
+        for (i = 0; i < 200; ++i) {
+            ecrt_master_receive(gkMaster);
+            ecrt_domain_process(gkDomain1);
+            ecrt_domain_queue(gkDomain1);
+            ecrt_master_send(gkMaster);
+            usleep(1000);
+        }
+
+        ecrt_master_receive(gkMaster);
+        ecrt_domain_process(gkDomain1);
+        cmd = 95;
+        EC_WRITE_U16(gkDomain1PD + gkOffOControl, cmd);
+        //EC_WRITE_U32(gkDomain1PD + gkOffOPos, val);
+        ecrt_domain_queue(gkDomain1);
+        ecrt_master_send(gkMaster);
+        usleep(1000);
+
+        //wait
+        for (i = 0; i < 1000; ++i) {
+            ecrt_master_receive(gkMaster);
+            ecrt_domain_process(gkDomain1);
+            ecrt_domain_queue(gkDomain1);
+            ecrt_master_send(gkMaster);
+            usleep(1000);
+        }
+
+#if 1
+        for (j = 0; ; j++) {
+           ecrt_master_receive(gkMaster);
+           ecrt_domain_process(gkDomain1);
+           ipos = EC_READ_U32(gkDomain1PD + gkOffIPos); //READ DATA 0x6064 position
+           istatus = EC_READ_U16(gkDomain1PD + gkOffIStatus); //READ DATA 0x6041 status
+           printf("Position: %d Status: 0x%x\n", ipos, istatus);
+           ecrt_domain_queue(gkDomain1);
+           ecrt_master_send(gkMaster);
+           usleep(1000000); //WAIT 1mS
+
+           if(ipos == cmdpos) {
+               printf("2-Position: %x Status: %x\n", ipos, istatus);
+               break;
+           }
+        }
+#endif
+    }
+
+    ecrt_master_receive(gkMaster);
+    ecrt_domain_process(gkDomain1);
+
+    printf("...Done. Releasing the master!\n");
+    ecrt_release_master(gkMaster); //RELEASE THE MASTER INSTANCE
+    return 0;
+}
