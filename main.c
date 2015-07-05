@@ -34,7 +34,7 @@ const static ec_pdo_entry_reg_t gkDomain1Regs[] = {
     {0, 1, 0x00007595, 0x00000000, 0x6064, 0, &gkOffIPos},
 //    {0, 1, 0x00007595, 0x00000000, 0x606c, 0, &gkOffIVel},
 //    {0, 1, 0x00007595, 0x00000000, 0x6077, 0, &gkOffITorq},
-    {0, 1, 0x00007595, 0x00000000, 0x60ff, 0, &gkOffOVel},
+    {0, 1, 0x00007595, 0x00000000, 0x60FF, 0, &gkOffOVel},
     {}
 };
 
@@ -164,16 +164,7 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    fprintf(stdout, "4. Configuring slave PDOs.\n");
-
-    ecrt_slave_config_sdo16( sc, 0x1C12, 1, 0x1600 ); /* list all RxPdo in 0x1C12:1-4 */
-    ecrt_slave_config_sdo8( sc, 0x1C12, 0, 1 ); /* set number of RxPDO */
-
-    ecrt_slave_config_sdo16( sc, 0x1C13, 1, 0x1A00 ); /* list all TxPdo in 0x1C13:1-4 */
-    ecrt_slave_config_sdo16( sc, 0x1C13, 2, 0x1A01 ); /* list all TxPdo in 0x1C13:1-4 */
-    ecrt_slave_config_sdo8( sc, 0x1C13, 0, 2 ); /* set number of TxPDO */
-
-    fprintf(stdout, "5. Configuring slave SDOs and sync managers done.\n");
+    fprintf(stdout, "4. Configuring slave PDOs and sync managers done.\n");
 
     // Регистируем PDO в домене
     if (ecrt_domain_reg_pdo_entry_list(gkDomain1, gkDomain1Regs)) {
@@ -181,21 +172,21 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    fprintf(stdout, "6. PDO entries registered in domain.\n");
+    fprintf(stdout, "5. PDO entries registered in domain.\n");
 
     if (ecrt_master_activate(gkMaster)) {
         fprintf(stderr,"Master activation failed.\n");
         return -1;
     }
 
-    fprintf(stdout, "7. Master activated.\n");
+    fprintf(stdout, "6. Master activated.\n");
 
     if (!(gkDomain1PD = ecrt_domain_data(gkDomain1))) {
       fprintf(stderr,"Domain data initialization failed.\n");
       return -1;
     }
 
-    fprintf(stdout, "8. Domain data registered.\n");
+    fprintf(stdout, "7. Domain data registered.\n");
 
     check_master_state();
     check_domain1_state();
