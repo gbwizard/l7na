@@ -120,73 +120,76 @@ int main(int argc, char **argv)
     }
 
     // Конфигурируем PDO подчиненного
-    fprintf(stdout, "4. Configuring slave PDO...\n");
-
-    ec_pdo_entry_info_t l7na_channel1[] = {
-        {0x3101, 1,  8}, // status
-        {0x3101, 2, 16}  // value
-    };
-
-    ec_pdo_entry_info_t l7na_channel2[] = {
-        {0x3102, 1,  8}, // status
-        {0x3102, 2, 16}  // value
+    // TxPDO
+    ec_pdo_entry_info_t l7na_tx_channel1[] = {
+        {0x6041, 0, 16},    // Statusword
+        {0x6061, 0, 8},     // The Modes of Operation Display
+        {0x6062, 0, 32},    // The Position Demand Value
+        {0x6063, 0, 32},    // The Position Actual Internal Value
+        {0x6064, 0, 32},    // The Position Actual Value
+        {0x606B, 0, 32},    // The Velocity Demand Value
+        {0x606C, 0, 32},    // The Actual Velocity Value
+        {0x2600, 0, 16},    // The Current Speed (RPM)
+        {0x2601, 0, 16},    // The Command Speed (RPM)
     };
 
     ec_pdo_info_t l7na_tx_pdos[] = {
-        {0x1A00, 2, l7na_channel1},
-        {0x1A01, 2, l7na_channel2}
+        {0x1A00, 9, l7na_tx_channel1}
+    };
+
+    // RxPDO
+    ec_pdo_entry_info_t l7na_rx_channel1[] = {
+        {0x6041, 0, 16},    // Controlword
+        {0x6060, 0, 8},     // Modes of Operation
+        {0x607A, 0, 32},    // The Target Position
+        {0x60FF, 0, 32},    // The Target Velocity (in Profile Velocity (Pv) mode and Cyclic Synchronous Velocity (Csv) modes)
+        {0x6071, 0, 16},    // The Target Torque
+    };
+
+    ec_pdo_info_t l7na_rx_pdos[] = {
+        {0x1600, 5, l7na_rx_channel1}
     };
 
     // Конфигурация SyncManagers 2 (FMMU0) и 3 (FMMU1)
     // { sync_mgr_idx, sync_mgr_direction, pdo_num, pdo_ptr, watch_dog_mode }
     // { 0xFF - end marker}
     ec_sync_info_t l7na_syncs[] = {
-        {2, EC_DIR_OUTPUT, 0, NULL, EC_WD_DEFAULT},
-        {3, EC_DIR_INPUT, 2, l7na_tx_pdos, EC_WD_DEFAULT},
+        {2, EC_DIR_OUTPUT, 2, l7na_rx_pdos, EC_WD_DISABLE},
+        {3, EC_DIR_INPUT, 2, l7na_tx_pdos, EC_WD_DISABLE},
         {0xFF}
     };
 
     if (ecrt_slave_config_pdos(sc, EC_END, l7na_syncs)) {
-        // handle error
+        fprintf(stderr, "Failed to configure slave pdo.\n");
+        return -1;
     }
 
-    // Очищаем RxPDO
-    ecrt_slave_config_sdo8 (sc, 0x1C12, 0, 0); /* clear sm pdo 0x1c12 */
-    ecrt_slave_config_sdo8 (sc, 0x1600, 0, 0); /* clear RxPdo 0x1600 */
-    ecrt_slave_config_sdo8 (sc, 0x1601, 0, 0); /* clear RxPdo 0x1601 */
-    ecrt_slave_config_sdo8 (sc, 0x1602, 0, 0); /* clear RxPdo 0x1602 */
-    ecrt_slave_config_sdo8 (sc, 0x1603, 0, 0); /* clear RxPdo 0x1603 */
+    fprintf(stdout, "4. Configuring slave PDOs and sync managers done.\n");
 
-    // Задаем RxPDO
-    ecrt_slave_config_sdo32(sс, 0x1600, 1, 0x60400010 ); /* 0x6040:0/16bits, control word */
-    ecrt_slave_config_sdo32(sc, 0x1600, 2, 0x60C10120 ); /* 0x60C1:1/32bits */
-    ecrt_slave_config_sdo8 (sc, 0x1600, 0, 2 ); /* set number of PDO entries for 0x1600 */
-    ecrt_slave_config_sdo16(sc, 0x1C12, 1, 0x1600 ); /* list all RxPDO in 0x1C12:1-4 */
-    ecrt_slave_config_sdo8 (sc, 0x1C12, 0, 1 ); /* set number of RxPDO */
-
+    // Регистируем PDO в домене
     if (ecrt_domain_reg_pdo_entry_list(gkDomain1, gkDomain1Regs)) {
         fprintf(stderr, "PDO entry registration failed!\n");
         return -1;
     }
-    printf("Step4\n");
 
-    printf("Activating master...");
-        if (ecrt_master_activate(gkMaster)) {
-          fprintf(stderr,"activation failed.\n");
-          return -1;
-        }
-    printf("Master ok!\n");
+    fprintf(stdout, "5. PDO entries registered in domain.\n");
+
+    if (ecrt_master_activate(gkMaster)) {
+        fprintf(stderr,"Master activation failed.\n");
+        return -1;
+    }
+
+    fprintf(stdout, "6. Master activated.\n");
 
     if (!(gkDomain1PD = ecrt_domain_data(gkDomain1))) {
       fprintf(stderr,"Domain data initialization failed.\n");
       return -1;
     }
-    printf("Domain data registered ok.\n");
+
+    fprintf(stdout, "7. Domain data registered.\n");
 
     check_master_state();
     check_domain1_state();
-
-    printf("Step5\n");
 
     uint32_t op_flag = 0, ipos = 0, istatus = 0;
 
@@ -215,6 +218,8 @@ int main(int argc, char **argv)
             break;
        }
     }
+
+    fprintf(stdout, "8. Got OP state.\n");
 
     if(argc > 1) {
 
