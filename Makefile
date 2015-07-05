@@ -1,4 +1,4 @@
-CFLAGS       := $(CFLAGS) -static -ggdb3
+CFLAGS       := $(CFLAGS) -static -ggdb3 -std=gnu99 -O0 -fno-inline
 ETHERCAT_DIR = ../ethercat/
 LIBS         = ethercat
 ALL_TARGETS  = servotech servotech3 klm
