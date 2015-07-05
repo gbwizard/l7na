@@ -154,8 +154,8 @@ int main(int argc, char **argv)
     // { sync_mgr_idx, sync_mgr_direction, pdo_num, pdo_ptr, watch_dog_mode }
     // { 0xFF - end marker}
     ec_sync_info_t l7na_syncs[] = {
-        {2, EC_DIR_OUTPUT, 2, l7na_rx_pdos, EC_WD_DISABLE},
-        {3, EC_DIR_INPUT, 2, l7na_tx_pdos, EC_WD_DISABLE},
+        {2, EC_DIR_OUTPUT, 1, l7na_rx_pdos, EC_WD_DISABLE},
+        {3, EC_DIR_INPUT, 1, l7na_tx_pdos, EC_WD_DISABLE},
         {0xFF}
     };
 
@@ -164,7 +164,16 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    fprintf(stdout, "4. Configuring slave PDOs and sync managers done.\n");
+    fprintf(stdout, "4. Configuring slave PDOs.\n");
+
+    ecrt_slave_config_sdo16( sc, 0x1C12, 1, 0x1600 ); /* list all RxPdo in 0x1C12:1-4 */
+    ecrt_slave_config_sdo8( sc, 0x1C12, 0, 1 ); /* set number of RxPDO */
+
+    ecrt_slave_config_sdo16( sc, 0x1C13, 1, 0x1A00 ); /* list all TxPdo in 0x1C13:1-4 */
+    ecrt_slave_config_sdo16( sc, 0x1C13, 2, 0x1A01 ); /* list all TxPdo in 0x1C13:1-4 */
+    ecrt_slave_config_sdo8( sc, 0x1C13, 0, 2 ); /* set number of TxPDO */
+
+    fprintf(stdout, "4. Configuring slave SDOs and sync managers done.\n");
 
     // Регистируем PDO в домене
     if (ecrt_domain_reg_pdo_entry_list(gkDomain1, gkDomain1Regs)) {
@@ -255,7 +264,7 @@ int main(int argc, char **argv)
         usleep(1000);
 
         //wait
-        for (i = 0; i < 200; ++i) {
+        for (uint32_t i = 0; i < 200; ++i) {
             ecrt_master_receive(gkMaster);
             ecrt_domain_process(gkDomain1);
             ecrt_domain_queue(gkDomain1);
@@ -273,7 +282,7 @@ int main(int argc, char **argv)
         usleep(1000);
 */
         //wait
-        for (i = 0; i < 1000; ++i) {
+        for (uint32_t i = 0; i < 1000; ++i) {
             ecrt_master_receive(gkMaster);
             ecrt_domain_process(gkDomain1);
             ecrt_domain_queue(gkDomain1);
@@ -282,7 +291,7 @@ int main(int argc, char **argv)
         }
 
 #if 1
-        for (j = 0; ; j++) {
+        for (uint32_t j = 0; ; j++) {
            ecrt_master_receive(gkMaster);
            ecrt_domain_process(gkDomain1);
            uint32_t ipos_new = EC_READ_U32(gkDomain1PD + gkOffIPos); //READ DATA 0x6064 position
