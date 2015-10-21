@@ -2,68 +2,105 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 /*! @brief API системы управления двигателями метеорологической антенны ДМРЛ-3
  *
  *  Описание работы с системой управления.
  *
+ *  До начала работы с системой управления ее состояние описывается константой STATE_OFF.
  *
+ *  Для начала работы необходимо вызывать функцию Init(config_file_path).
+ *  Синтаксис конфигурационного файла - набор строчек вида:
+ *  @code{.unparsed}
+ *  60F7=35     // Комментарий 1
+ *  6083=20000  // Комментарий 2
+ *  # Комментарий 3
+ *  6084=20000
+ *  ...
+ *  @endcode
+ *  где поле слева от '=' - адрес регистра, а справа - значение, которое туда нужно записать
+ *  при инициализации системы.
  *
- *  @attention Методы _НЕ_ потокобезопасны.
+ *  После успешной инициализации система переходит в статут STATE_IDLE.
+ *
+ *  Далее возможен переход в один из основных режимов работы - сканирование по азимуту или
+ *  позиционирование в точку. Для каждого режима выделена отдельная функция. Состояние системы описывается одной
+ *  из констант [STATE_SCAN, STATE_POINT].
+ *
+ *  Получение текущих значений для обоих осей осуществляется вызов функции GetStatus,
+ *  возвращающей развернутый текущий статус системы.
+ *
+ *  При возникновении ошибки состояние системы становится STATE_ERROR. Поле error_code для двигателя, вызвавшего ошибку
+ *  установлено в соответствующее значение. Для продолжения работы необходимо сначала перевести систему в STATE_IDLE
+ *  соответствующим вызовом.
+ *
+ *  При завершении работы необходимо из любого режима вызвать метод Release(), который остановит двигатели
+ *  и произведет необходимую деинициализацию.
  */
 
 //! @brief Возможные состояния системы управления.
 enum State {
-    STATE_OFF = 0,
-    STATE_READY,
-    STATE_SCAN_ON_ELEVATION,
-    STATE_SCAN_ON_AZIMUTH,
-    STATE_POSITION,
-    STATE_ERROR,
-    STATE_ERROR_FATAL
+    STATE_OFF = 0,                  //!< Выключен (до вызова Init или после вызова Release)
+    STATE_IDLE,                     //!< Включен, готов к работе
+    STATE_SCAN,                     //!< Работает в режиме "Сканирование по азимуту"
+    STATE_POINT,                    //!< Работает в режиме "Установка в точку"
+    STATE_ERROR                     //!< Состояние ошибки
 };
 
-//! @brief Параметры, которые возможно получить из системы управления.
-struct System {
-    struct AxisParams {
-        enum OperationMode {
-
-        };
-
-        double target_velocity;
-        double cur_velocity;
-
-        double tartet_
-    };
-
-    double azimuth_velocity;
-    double azimuth_position;
-    double elevation_velocity;
-    double elevation_position;
+//! @brief Текущие значения для одной оси системы
+struct AxisParams {
+    int32_t target_position;        //!< Целевая позиция [импульсы энкодера]
+    int32_t cur_position;           //!< Текущая позиция [импульсы энкодера]
+    int32_t target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
+    int32_t cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
+    int32_t cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
+    uint32_t error_code;            //!< Код ошибки двигателя по CiA402
 };
 
-//! @brief Инициализирует систему управления.
-//!
-//! @param   cfg_file_path  Путь к файлу с конфигурацией системы (абсолютный или относительно текущей рабочей директории)
-//!
-//! @return Одно из значений в перечислении State.
-int Init(const char* cfg_file_path);
+//! @brief Текущие значения, возвращаемые системой управления
+struct Status {
+    struct AxisParams azimuth;      //!< Статус двигателя по азимуту
+    struct AxisParams elevation;    //!< Статус двигателя по углу места
+    int32_t state;                  //!< Состояние системы (значение из enum State)
+};
 
-//! @brief Приводит систему управления в первоначальное состояние/выключает систему управления.
-//! @return Одно из значений в перечисления State.
-int Release();
+/*! @brief Инициализирует систему управления.
+ *
+ *  @param   cfg_file_path  Путь к файлу с конфигурацией системы (абсолютный или относительно текущей рабочей директории)
+ */
+void Init(const char* cfg_file_path);
 
-int SetModeAzimuthRotation(double elevation_angle, double azimuth_velocity);
-int SetModeElevationRotation(double azimuth_angle, double elevation_velocity);
-int SetModePointPosition(double azimuth_angle, double elevation_angle);
+/*! @brief Приводит систему управления в первоначальное состояние/выключает систему управления.
+ */
+void Release();
 
-//! @brief Получаем текущее состояние системы управления.
-//! @return Одно из значений в перечислении State.
-int GetState();
+/*! @brief Переключает систему управления в режим сканирования по азимуту.
+ *
+ *  @param  azimuth_velocity    Скорость азимутального вращения [импульсы энкодера/с]
+ *  @param  elevation_angle     Фиксированный угол места [импульсы энкодера]
+ */
+void SetModeScan(int32_t azimuth_velocity, int32_t elevation_angle);
 
-double GetAzimuthVelocity();
-double GetAzimuthPosition();
-double GetElevationVelocity();
-double GetElevationPosition();
+/*! @brief Переключает систему управления в режим позиционирования в точку.
+ *
+ *  @param  azimuth_angle       Фиксированный угол по азимуту [импульсы энкодера]
+ *  @param  elevation_angle     Фиксированный угол места [импульсы энкодера]
+ */
+void SetModePoint(int32_t azimuth_angle, int32_t elevation_angle);
+
+/*! @brief Переключает систему управления в режим бездейсвтия.
+ *
+ *  @attention При возникновении ошибки этот вызов также сбрасывает состояние ошибки
+ *             и приводит систему в состояние готовности к дальнейшей работе.
+  */
+void SetModeIdle();
+
+/*! @brief Получаем текущее состояние системы управления.
+ *
+ *  @return Структуру Status, заполненную актуальными данными.
+ */
+const struct Status GetStatus();
 
 #ifdef __cplusplus
 } // extern "C"
