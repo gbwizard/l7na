@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "ecrt.h"
 
@@ -47,7 +48,7 @@ const static ec_pdo_entry_reg_t gkDomain1Regs[] = {
     {0, gkDriveNum, 0x00007595, 0x00000000, 0x6060, 0, &gkOffOMode},
     {0, gkDriveNum, 0x00007595, 0x00000000, 0x6061, 0, &gkOffIMode},
     {0, gkDriveNum, 0x00007595, 0x00000000, 0x60ff, 0, &gkOffTVel},
-//    {0, gkDriveNum, 0x00007595, 0x00000000, 0x200F, 0, &gkOffPDenom},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6077, 0, &gkOffITorq},
     {}
 };
 
@@ -143,12 +144,12 @@ int main(int argc, char **argv)
         {0x6081, 0, 32},    // The Profile Velocity
         {0x606C, 0, 32},    // The Actual Velocity Value
         {0x607A, 0, 32},    // The Target Position
-//        {0x200E, 0, 16},    // Position Scale Numerator
+        {0x6077, 0, 16},    // Actual torque value
 //        {0x200F, 0, 16},    // Position Scale Denominator
     };
 
     ec_pdo_info_t l7na_tx_pdos[] = {
-        {0x1A00, 8, l7na_tx_channel1}
+        {0x1A00, 9, l7na_tx_channel1}
     };
 
     // RxPDO
@@ -248,8 +249,8 @@ int main(int argc, char **argv)
         ecrt_master_receive(gkMaster);
         ecrt_domain_process(gkDomain1);
         EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0xF); //0x6040 ControlWord
-        EC_WRITE_U8(gkDomain1PD + gkOffOMode, 1); // 0x6060 Profile position mode // 3 - for velocity mode
-        EC_WRITE_S32(gkDomain1PD + gkOffPVel, 3000000); // 0x60ff profile velocity // gkOffTVel - for velocity mode
+        EC_WRITE_U8(gkDomain1PD + gkOffOMode, 1); // 0x6060 Profile position mode // 3 - for velocity mode, 1- for position mode
+        EC_WRITE_S32(gkDomain1PD + gkOffPVel, 1000000); // 0x60ff profile velocity // gkOffTVel - for velocity mode
         ecrt_domain_queue(gkDomain1);
         ecrt_master_send(gkMaster);
         usleep(1000);
@@ -268,7 +269,7 @@ int main(int argc, char **argv)
         ecrt_domain_process(gkDomain1);
 /* comment 2 lines for velocity mode */
         EC_WRITE_S32(gkDomain1PD + gkOffOPos, cmdpos);
-        EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x1F);
+        EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x11F);
         ecrt_domain_queue(gkDomain1);
         ecrt_master_send(gkMaster);
         usleep(1000);
@@ -299,6 +300,14 @@ int main(int argc, char **argv)
         }
 */
 
+timespec tbegin, tend;
+clock_gettime(CLOCK_MONOTONIC, &tbegin);
+printf("Time begin: %lds/%ldns\n", tbegin.tv_sec, tbegin.tv_nsec);
+const uint32_t kIterationMax = 500000;
+uint32_t change_count = 0;
+
+bool target_reached = false;
+
 #if 1
         for (uint32_t j = 0; ; j++) {
            ecrt_master_receive(gkMaster);
@@ -312,30 +321,38 @@ int main(int argc, char **argv)
             int32_t idpos = EC_READ_S32(gkDomain1PD + gkOffDPos);
             int32_t itpos = EC_READ_S32(gkDomain1PD + gkOffOPos);
             int32_t icontrol = EC_READ_U16(gkDomain1PD + gkOffOControl);
+            int16_t iatorq = EC_READ_S16(gkDomain1PD + gkOffITorq);
 //            int32_t ipdenom = EC_READ_S16(gkDomain1PD + gkOffPDenom);
-            if (ipos_new != ipos || istatus_new != istatus) {
+            if (ipos_new != ipos) {
                 ipos = ipos_new;
-                istatus = istatus_new;
-                printf("Position: %d Status: 0x%x Mode: %d PVel: %d DVel: %d AVel: %d DPos: %d TPos: %d OControl: 0x%x\n", ipos, istatus, imode, ipvel, idvel, iavel, idpos, itpos, icontrol);
+                change_count++;
+                printf("Position: %d Status: 0x%x Mode: %d ATorq: %d PVel: %d DVel: %d AVel: %d DPos: %d TPos: %d OControl: 0x%x\n", ipos, istatus, imode, iatorq, ipvel, idvel, iavel, idpos, itpos, icontrol);
             }
 
-            if((istatus_new >> 10) & 0x1) {
+// position mode
+            if(! target_reached && ((istatus_new >> 10) & 0x1)) {
                printf("Target reached. Pos: %d Status: 0x%x\n", ipos, istatus);
-                break;
+                target_reached = true;
+/*                if ((istatus_new >> 7) & 0x1) {
+                    EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x18F);
+                } else {
+                    EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x10F);
+                }*/
+                //break;
            }
 
-/* Velocity mode
-        if (j == 10000) {
-            printf("Iterations=%d, stopping",j);
+/* Velocity mode */
+/*        if (j == kIterationMax) {
+            clock_gettime(CLOCK_MONOTONIC, &tend);
+            printf("Iterations=%d, change_count=%d. time_end=%lds/%ldns Stopping...\n", j, change_count, tend.tv_sec, tend.tv_nsec);
             EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x6);
             break;
         }
 */
-
             
           ecrt_domain_queue(gkDomain1);
           ecrt_master_send(gkMaster);
-           usleep(1000); //WAIT 1mS
+           usleep(100); //WAIT 1mS
 
         }
 #endif
