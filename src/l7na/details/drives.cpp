@@ -1,6 +1,9 @@
 #include <thread>
+#include <map>
 
 #include <boost/filesystem/path.hpp>
+
+#include "ecrt.h"
 
 #include "l7na/drives.h"
 
@@ -19,7 +22,9 @@ protected:
 
     Impl(const char* cfg_file_path)
         : m_cfg_path (cfg_file_path)
-    {}
+    {
+
+    }
 
     void SetModeRun(int32_t azimuth_angle, int32_t azimuth_velocity, int32_t elevation_angle, int32_t elevation_velocity) {
         ;
@@ -39,6 +44,7 @@ protected:
 
 private:
     fs::path                        m_cfg_path;     //!< Путь к файлу конфигурации
+    std::map<uint16_t, uint32_t>    m_sdo_cfg;      //!< Конфигурация SDO
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
     SystemInfo                      m_sys_info;     //!< Структура с статической информацией о системе
     SystemStatus                    m_sys_status;   //!< Структура с динамической информацией о системе

@@ -40,7 +40,7 @@
 namespace Drives {
 
 //! @brief Возможные состояния каждого двигателя
-enum State {
+enum AxisState {
     STATE_OFF = 0,                  //!< Выключен (до вызова Init или после вызова Release)
     STATE_IDLE,                     //!< Включен, готов к работе
     STATE_SCAN,                     //!< Работает в режиме "Сканирование"
@@ -56,14 +56,22 @@ struct AxisStatus {
     std::atomic<int32_t>    cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
     std::atomic<int32_t>    cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
     std::atomic<int32_t>    cur_temperature;        //!< Текущая температура для сервоусилителя
-    std::atomic<State>      state;                  //!< Текущее состояние системы управления осью
+    std::atomic<AxisState>  state;                  //!< Текущее состояние системы управления осью
     std::atomic<uint32_t>   error_code;             //!< Код ошибки двигателя по CiA402
+};
+
+enum SystemState {
+    SYSTEM_OFF = -1,
+    SYSTEM_OK = 0,
+    SYSTEM_ERROR
 };
 
 //! @brief Текущие значения, возвращаемые системой управления
 struct SystemStatus {
     AxisStatus azimuth;             //!< Статус двигателя по азимуту
     AxisStatus elevation;           //!< Статус двигателя по углу места
+    SystemState state;              //!< Состояние системы
+    std::string error_str;          //!< Описание ошибки или пустая строка
 };
 
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
