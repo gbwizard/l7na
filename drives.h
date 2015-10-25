@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <atomic>
+#include <memory>
 
 /*! @brief API системы управления двигателями метеорологической антенны ДМРЛ-3
  *
@@ -48,14 +50,14 @@ enum State {
 
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
-    int32_t target_position;        //!< Целевая позиция [импульсы энкодера]
-    int32_t cur_position;           //!< Текущая позиция [импульсы энкодера]
-    int32_t target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
-    int32_t cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
-    int32_t cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
-    int32_t cur_temperature;        //!< Текущая температура для сервоусилителя
-    State   state;                  //!< Текущее состояние системы управления осью
-    uint32_t error_code;            //!< Код ошибки двигателя по CiA402
+    std::atomic<int32_t>    target_position;        //!< Целевая позиция [импульсы энкодера]
+    std::atomic<int32_t>    cur_position;           //!< Текущая позиция [импульсы энкодера]
+    std::atomic<int32_t>    target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
+    std::atomic<int32_t>    cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
+    std::atomic<int32_t>    cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
+    std::atomic<int32_t>    cur_temperature;        //!< Текущая температура для сервоусилителя
+    std::atomic<State>      state;                  //!< Текущее состояние системы управления осью
+    std::atomic<uint32_t>   error_code;             //!< Код ошибки двигателя по CiA402
 };
 
 //! @brief Текущие значения, возвращаемые системой управления
@@ -74,7 +76,7 @@ struct AxisInfo {
      * 4 - Serial type Abs encoder (20-bit) <-- сейчас используется этот.
      * 5 - Serial type Abs encoder (24-bit)
      */
-    uint16_t encoder_type;
+    std::atomic<uint16_t>   encoder_type;
 };
 
 //! @brief Статическая информация для системы
@@ -88,8 +90,8 @@ struct SystemInfo {
  *  Созданием объекта == подлключение к системе управления
  *
  */
-struct Control {
-
+class Control {
+public:
     /*! @brief Конструктор. Инициализирует систему управления.
      *
      *  @param   cfg_file_path  Путь к файлу с конфигурацией системы (абсолютный или относительно текущей рабочей директории)
@@ -140,7 +142,7 @@ struct Control {
      */
     void SetModeIdle();
 
-    /*! @brief Получаем текущее состояние системы управления.
+    /*! @brief Получаем текущее состояние системы управления (динамически изменяемые)
      *
      *  @return Структуру Status, заполненную актуальными данными.
      */
@@ -151,6 +153,10 @@ struct Control {
      *  @return Структуру SystemInfo, заполненную актуальными данными.
      */
     const SystemInfo& GetSystemInfo() const;
+
+private:
+    class Impl;
+    std::unique_ptr<Impl> m_pimpl;
 };
 
 } // namespaces
