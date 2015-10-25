@@ -33,19 +33,21 @@ static uint32_t gkOffDPos;
 static uint32_t gkOffOMode, gkOffIMode;
 static uint32_t gkOffPNumer, gkOffPDenom;
 
+const static uint32_t gkDriveNum = 0;
+
 const static ec_pdo_entry_reg_t gkDomain1Regs[] = {
-    {0, 0, 0x00007595, 0x00000000, 0x6040, 0, &gkOffOControl},
-    {0, 0, 0x00007595, 0x00000000, 0x607a, 0, &gkOffOPos},
-    {0, 0, 0x00007595, 0x00000000, 0x6041, 0, &gkOffIStatus},
-    {0, 0, 0x00007595, 0x00000000, 0x6062, 0, &gkOffDPos},
-    {0, 0, 0x00007595, 0x00000000, 0x6064, 0, &gkOffIPos},
-    {0, 0, 0x00007595, 0x00000000, 0x606b, 0, &gkOffDVel},
-    {0, 0, 0x00007595, 0x00000000, 0x606c, 0, &gkOffIVel},
-    {0, 0, 0x00007595, 0x00000000, 0x6081, 0, &gkOffPVel},
-    {0, 0, 0x00007595, 0x00000000, 0x6060, 0, &gkOffOMode},
-    {0, 0, 0x00007595, 0x00000000, 0x6061, 0, &gkOffIMode},
-    {0, 0, 0x00007595, 0x00000000, 0x60ff, 0, &gkOffTVel},
-//    {0, 0, 0x00007595, 0x00000000, 0x200F, 0, &gkOffPDenom},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6040, 0, &gkOffOControl},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x607a, 0, &gkOffOPos},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6041, 0, &gkOffIStatus},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6062, 0, &gkOffDPos},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6064, 0, &gkOffIPos},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x606b, 0, &gkOffDVel},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x606c, 0, &gkOffIVel},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6081, 0, &gkOffPVel},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6060, 0, &gkOffOMode},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x6061, 0, &gkOffIMode},
+    {0, gkDriveNum, 0x00007595, 0x00000000, 0x60ff, 0, &gkOffTVel},
+//    {0, gkDriveNum, 0x00007595, 0x00000000, 0x200F, 0, &gkOffPDenom},
     {}
 };
 
@@ -121,7 +123,7 @@ int main(int argc, char **argv)
     }
 
     // Создаем объект конфигурации подчиненного.
-    ec_slave_config_t* sc = ecrt_master_slave_config(gkMaster, 0, 0, 0x00007595, 0x00000000);
+    ec_slave_config_t* sc = ecrt_master_slave_config(gkMaster, 0, gkDriveNum, 0x00007595, 0x00000000);
 
     if (sc) {
         fprintf(stdout, "3. Slave configuration object created.\n");
@@ -246,8 +248,8 @@ int main(int argc, char **argv)
         ecrt_master_receive(gkMaster);
         ecrt_domain_process(gkDomain1);
         EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0xF); //0x6040 ControlWord
-        EC_WRITE_U8(gkDomain1PD + gkOffOMode, 3); // 0x6060 Profile position mode
-        EC_WRITE_S32(gkDomain1PD + gkOffTVel, cmdpos); // 0x60ff profile velocity
+        EC_WRITE_U8(gkDomain1PD + gkOffOMode, 1); // 0x6060 Profile position mode // 3 - for velocity mode
+        EC_WRITE_S32(gkDomain1PD + gkOffPVel, 3000000); // 0x60ff profile velocity // gkOffTVel - for velocity mode
         ecrt_domain_queue(gkDomain1);
         ecrt_master_send(gkMaster);
         usleep(1000);
@@ -264,8 +266,9 @@ int main(int argc, char **argv)
 
         ecrt_master_receive(gkMaster);
         ecrt_domain_process(gkDomain1);
-//        EC_WRITE_S32(gkDomain1PD + gkOffOPos, cmdpos);
-//        EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x1F);
+/* comment 2 lines for velocity mode */
+        EC_WRITE_S32(gkDomain1PD + gkOffOPos, cmdpos);
+        EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x1F);
         ecrt_domain_queue(gkDomain1);
         ecrt_master_send(gkMaster);
         usleep(1000);
@@ -318,13 +321,16 @@ int main(int argc, char **argv)
 
             if((istatus_new >> 10) & 0x1) {
                printf("Target reached. Pos: %d Status: 0x%x\n", ipos, istatus);
+                break;
            }
 
+/* Velocity mode
         if (j == 10000) {
             printf("Iterations=%d, stopping",j);
             EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x6);
             break;
         }
+*/
 
             
           ecrt_domain_queue(gkDomain1);
