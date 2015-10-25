@@ -26,13 +26,10 @@ static uint32_t gkOffIStatus;
 static uint32_t gkOffIPos;
 static uint32_t gkOffIVel;
 static uint32_t gkOffPVel;
-static uint32_t gkOffPAccel;
 static uint32_t gkOffITorq;
-static uint32_t gkOffOVel;
 static uint32_t gkOffDVel, gkOffTVel;
 static uint32_t gkOffDPos;
 static uint32_t gkOffOMode, gkOffIMode;
-static uint32_t gkOffPNumer, gkOffPDenom;
 
 const static uint32_t gkDriveNum = 0;
 
@@ -210,7 +207,8 @@ int main(int argc, char **argv)
     check_master_state();
     check_domain1_state();
 
-    uint32_t op_flag = 0, ipos = 0, istatus = 0;
+    int32_t op_flag = 0, ipos = 0;
+    uint16_t istatus = 0;
 
     //ждать режим OP
     for(uint32_t j = 0; ; j++) {
@@ -300,15 +298,14 @@ int main(int argc, char **argv)
         }
 */
 
-timespec tbegin, tend;
-clock_gettime(CLOCK_MONOTONIC, &tbegin);
-printf("Time begin: %lds/%ldns\n", tbegin.tv_sec, tbegin.tv_nsec);
-const uint32_t kIterationMax = 500000;
-uint32_t change_count = 0;
+        timespec tbegin, tend;
+        clock_gettime(CLOCK_MONOTONIC, &tbegin);
+        printf("Time begin: %lds/%ldns\n", tbegin.tv_sec, tbegin.tv_nsec);
+        const uint32_t kIterationMax = 500000;
+        uint32_t change_count = 0;
 
-bool target_reached = false;
+        bool target_reached = false;
 
-#if 1
         for (uint32_t j = 0; ; j++) {
            ecrt_master_receive(gkMaster);
            ecrt_domain_process(gkDomain1);
@@ -331,36 +328,27 @@ bool target_reached = false;
 
 // position mode
             if(! target_reached && ((istatus_new >> 10) & 0x1)) {
-               printf("Target reached. Pos: %d Status: 0x%x\n", ipos, istatus);
+                clock_gettime(CLOCK_MONOTONIC, &tend);
+                printf("Target reached. Pos: %d Status: 0x%x TEnd=%lds/%ldns\n", ipos, istatus, tend.tv_sec, tend.tv_nsec);
                 target_reached = true;
-/*                if ((istatus_new >> 7) & 0x1) {
-                    EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x18F);
-                } else {
-                    EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x10F);
-                }*/
                 //break;
            }
 
 /* Velocity mode */
-/*        if (j == kIterationMax) {
-            clock_gettime(CLOCK_MONOTONIC, &tend);
+        if (j == kIterationMax) {
+/*            clock_gettime(CLOCK_MONOTONIC, &tend);
             printf("Iterations=%d, change_count=%d. time_end=%lds/%ldns Stopping...\n", j, change_count, tend.tv_sec, tend.tv_nsec);
             EC_WRITE_U16(gkDomain1PD + gkOffOControl, 0x6);
             break;
-        }
 */
+        }
             
           ecrt_domain_queue(gkDomain1);
           ecrt_master_send(gkMaster);
            usleep(100); //WAIT 1mS
 
         }
-#endif
     }
-
-    end:
-
-    
 
     ecrt_master_receive(gkMaster);
     ecrt_domain_process(gkDomain1);

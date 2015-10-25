@@ -66,7 +66,7 @@ struct SystemStatus {
     AxisStatus elevation;           //!< Статус двигателя по углу места
 };
 
-//! @brief Статическая информация для одной оси
+//! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
 struct AxisInfo {
     /*! Тип энкодера.
      * 0 - unknown
@@ -76,7 +76,10 @@ struct AxisInfo {
      * 4 - Serial type Abs encoder (20-bit) <-- сейчас используется этот.
      * 5 - Serial type Abs encoder (24-bit)
      */
-    std::atomic<uint16_t>   encoder_type;
+    uint16_t        encoder_type;
+    std::string     dev_name;           //!< Название устройства
+    std::string     hw_version;         //!< Версия аппаратного обепечения
+    std::string     sw_version;         //!< Версия программного обеспечения
 };
 
 //! @brief Статическая информация для системы

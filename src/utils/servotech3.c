@@ -26,24 +26,24 @@ static unsigned int off_n[30];
 
 const static ec_pdo_entry_reg_t domain1_regs[] = {
     {0, 0, 0x00007595, 0x00000000, 0x6040, 0, &off_n[0]},
-//    {0, 0, 0x00007595, 0x00000000, 0x6071, 0, &off_n[1]},
+    {0, 0, 0x00007595, 0x00000000, 0x6071, 0, &off_n[1]},
     {0, 0, 0x00007595, 0x00000000, 0x607a, 0, &off_n[2]},
-//    {0, 0, 0x00007595, 0x00000000, 0x6060, 0, &off_n[3]},
-//    {0, 0, 0x00007595, 0x00000000, 0x60b8, 0, &off_n[4]},
+    {0, 0, 0x00007595, 0x00000000, 0x6060, 0, &off_n[3]},
+    {0, 0, 0x00007595, 0x00000000, 0x60b8, 0, &off_n[4]},
 
     {0, 0, 0x00007595, 0x00000000, 0x6041, 0, &off_dig_in1},
 
-//    {0, 0, 0x00007595, 0x00000000, 0x6077, 0, &off_n[5]},
+    {0, 0, 0x00007595, 0x00000000, 0x6077, 0, &off_n[5]},
 
     {0, 0, 0x00007595, 0x00000000, 0x6064, 0, &off_dig_in},
 
-//    {0, 0, 0x00007595, 0x00000000, 0x60f4, 0, &off_n[6]},
-//    {0, 0, 0x00007595, 0x00000000, 0x60fd, 0, &off_n[7]},
-//    {0, 0, 0x00007595, 0x00000000, 0x6061, 0, &off_n[8]},
-//    {0, 0, 0x00007595, 0x00000000, 0x2601, 0, &off_n[9]},
-//    {0, 0, 0x00007595, 0x00000000, 0x2600, 0, &off_n[10]},
-//    {0, 0, 0x00007595, 0x00000000, 0x60b9, 0, &off_n[11]},
-//    {0, 0, 0x00007595, 0x00000000, 0x60ba, 0, &off_n[12]},
+    {0, 0, 0x00007595, 0x00000000, 0x60f4, 0, &off_n[6]},
+    {0, 0, 0x00007595, 0x00000000, 0x60fd, 0, &off_n[7]},
+    {0, 0, 0x00007595, 0x00000000, 0x6061, 0, &off_n[8]},
+    {0, 0, 0x00007595, 0x00000000, 0x2601, 0, &off_n[9]},
+    {0, 0, 0x00007595, 0x00000000, 0x2600, 0, &off_n[10]},
+    {0, 0, 0x00007595, 0x00000000, 0x60b9, 0, &off_n[11]},
+    {0, 0, 0x00007595, 0x00000000, 0x60ba, 0, &off_n[12]},
     {}
 };
 static char slaves_up = 0;
@@ -165,7 +165,7 @@ int main(void) //(int argc, char **argv)
        }
        in = EC_READ_U32(domain1_pd + off_dig_in); //READ DATA 0x6064 position
        in1 = EC_READ_U16(domain1_pd + off_dig_in1); //READ DATA 0x6041 status
-       printf("Position: %d Status: 0x%x, ofs1=%u, ofs2=%u\n", in, in1, off_dig_in, off_dig_in1);
+       printf("Position: %x Status: %x, ofs1=%u, ofs2=%u\n", in, in1, off_dig_in, off_dig_in1);
 
        // send process data
        ecrt_domain_queue(domain1); //MARK THE DOMAIN DATA AS READY FOR EXCHANGE
@@ -179,3 +179,4 @@ int main(void) //(int argc, char **argv)
     ecrt_release_master(master); //RELEASE THE MASTER INSTANCE
     return 0;
 }
+
