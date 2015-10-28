@@ -12,8 +12,6 @@ static ec_master_t*         gkMaster = NULL;
 static ec_master_state_t    gkMasterState = {};
 static ec_domain_t*         gkDomain1 = NULL;
 static ec_domain_state_t    gkDomain1State = {};
-static ec_slave_config_t*   gkSlaveStateDigOut = NULL;
-static ec_slave_config_t*   gkSlaveStateDigIn = NULL;
 
 /****************************************************************************/
 
@@ -49,8 +47,6 @@ const static ec_pdo_entry_reg_t gkDomain1Regs[] = {
     {}
 };
 
-static char gkSlavesUp = 0;
-
 /*****************************************************************************/
 
 void check_domain1_state() {
@@ -76,25 +72,6 @@ void check_master_state() {
     if (ms.link_up != gkMasterState.link_up)
         printf("Link is %s.\n", ms.link_up ? "up" : "down");
     gkMasterState = ms;
-}
-
-/*****************************************************************************/
-void check_slave_config_states() {
-    ec_slave_config_state_t s;
-    ecrt_slave_config_state(gkSlaveStateDigOut, &s);
-    if (gkSlavesUp < 1 && s.al_state != 0x08) {
-        printf("DigOut: State 0x%02X.\n", s.al_state);
-    }
-    if (gkSlavesUp < 1 && s.al_state == 0x08) {
-        gkSlavesUp = 1;
-    }
-    ecrt_slave_config_state(gkSlaveStateDigIn, &s);
-    if (gkSlavesUp < 2 && s.al_state != 0x08) {
-        printf("DigIn: State 0x%02X.\n", s.al_state);
-    }
-    if (gkSlavesUp < 2 && s.al_state == 0x08) {
-        gkSlavesUp = 2;
-    }
 }
 
 /*****************************************************************************/
