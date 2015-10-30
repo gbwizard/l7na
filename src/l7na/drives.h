@@ -50,6 +50,17 @@ enum AxisState {
 
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
+    AxisStatus() noexcept
+        : target_position(0)
+        , cur_position(0)
+        , target_velocity(0)
+        , cur_velocity(0)
+        , cur_torque(0)
+        , cur_temperature(0)
+        , state(STATE_OFF)
+        , error_code(0)
+    {}
+
     int32_t    target_position;        //!< Целевая позиция [импульсы энкодера]
     int32_t    cur_position;           //!< Текущая позиция [импульсы энкодера]
     int32_t    target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
@@ -68,6 +79,13 @@ enum SystemState {
 
 //! @brief Текущие значения, возвращаемые системой управления
 struct SystemStatus {
+    SystemStatus() noexcept
+        : azimuth()
+        , elevation()
+        , state(SYSTEM_OFF)
+        , error_str()
+    {}
+
     AxisStatus azimuth;             //!< Статус двигателя по азимуту
     AxisStatus elevation;           //!< Статус двигателя по углу места
     SystemState state;              //!< Состояние системы
@@ -76,6 +94,13 @@ struct SystemStatus {
 
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
 struct AxisInfo {
+    AxisInfo() noexcept
+        : encoder_type(4)
+        , dev_name()
+        , hw_version()
+        , sw_version()
+    {}
+
     /*! Тип энкодера.
      * 0 - unknown
      * 1 - Serial type encoder (-)
@@ -92,6 +117,11 @@ struct AxisInfo {
 
 //! @brief Статическая информация для системы
 struct SystemInfo {
+    SystemInfo() noexcept
+        : azimuth()
+        , elevation()
+    {}
+
     AxisInfo azimuth;
     AxisInfo elevation;
 };
