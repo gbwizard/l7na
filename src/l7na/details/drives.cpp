@@ -22,16 +22,16 @@ DECLARE_EXCEPTION(Exception, common::Exception);
 class Control::Impl {
 public:
     ~Impl() {
-        // Освобождаем мастер-объект
-        ecrt_release_master(m_master);
-
-        LOG_INFO("Master released");
-
         if (m_thread) {
             m_stop_flag.store(true, std::memory_order_relaxed);
             m_thread->join();
             m_thread.reset();
         }
+
+        // Освобождаем мастер-объект
+        ecrt_release_master(m_master);
+
+        LOG_INFO("Master released");
     }
 
 protected:
@@ -206,7 +206,7 @@ protected:
         bool op_state = false;
         uint32_t cycle_cnt = 0;
 
-        while (! op_state) {
+        while (! op_state || m_stop_flag.load(std::memory_order_consume)) {
             // Receive data from slaves
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
@@ -229,6 +229,8 @@ protected:
            if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
               LOG_INFO("Domain is up at " << cycle_cnt << " cycles");
               op_state = true;
+           } else if (cycle_cnt % 10000 == 0) {
+               LOG_WARN("Domain is NOT up at " << cycle_cnt << " cycles. Domain state=" << m_domain_state.wc_state);
            }
 
            // Send queued data
@@ -295,7 +297,7 @@ private:
     uint32_t                        m_offro_act_torq[DRIVE_COUNT];
  };
 
-const uint32_t  Control::Impl::kCyclePollingSleepUs = 100;
+const uint32_t  Control::Impl::kCyclePollingSleepUs = 1000;
 const uint32_t  Control::Impl::kRegPerDriveCount = 12;
 
 Control::Control(const char* cfg_file_path)
