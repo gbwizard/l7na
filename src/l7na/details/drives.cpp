@@ -40,8 +40,8 @@ protected:
     Impl(const char* cfg_file_path)
         : m_cfg_path (cfg_file_path)
         , m_sdo_cfg()
-        , m_sys_info{}
-        , m_sys_status()
+        , m_sys_info{SystemInfo()}
+        , m_sys_status{SystemStatus()}
         , m_stop_flag(false)
         , m_thread()
     {
@@ -181,8 +181,10 @@ protected:
             LOG_INFO("Cyclic polling thread started");
         } catch (const std::exception& ex) {
             LOG_ERROR(ex.what());
-            m_sys_status.state = SYSTEM_ERROR;
-            m_sys_status.error_str = ex.what();
+            SystemStatus s;
+            s.state = SYSTEM_ERROR;
+            s.error_str = ex.what();
+            m_sys_status.store(s);
         }
     }
 
@@ -194,11 +196,11 @@ protected:
         ;
     }
 
-    const SystemStatus& GetStatus() const {
+    const std::atomic<SystemStatus>& GetStatus() const {
         return m_sys_status;
     }
 
-    const SystemInfo& GetSystemInfo() const {
+    const std::atomic<SystemInfo>& GetSystemInfo() const {
         return m_sys_info;
     }
 
@@ -266,8 +268,8 @@ private:
 
     fs::path                        m_cfg_path;     //!< Путь к файлу конфигурации
     std::map<uint16_t, int64_t>     m_sdo_cfg;      //!< Конфигурация SDO
-    SystemInfo                      m_sys_info;     //!< Структура с статической информацией о системе
-    SystemStatus                    m_sys_status;   //!< Структура с динамической информацией о системе
+    std::atomic<SystemInfo>         m_sys_info;     //!< Структура с статической информацией о системе
+    std::atomic<SystemStatus>       m_sys_status;   //!< Структура с динамической информацией о системе
 
     //! Данные для взаимодействия с потоком циклического взаимодействия с сервоусилителями
     std::atomic<bool>               m_stop_flag;    //!< Флаг остановки потока взаимодействия
@@ -297,7 +299,7 @@ private:
     uint32_t                        m_offro_act_torq[DRIVE_COUNT];
  };
 
-const uint32_t  Control::Impl::kCyclePollingSleepUs = 1000;
+const uint32_t  Control::Impl::kCyclePollingSleepUs = 500;
 const uint32_t  Control::Impl::kRegPerDriveCount = 12;
 
 Control::Control(const char* cfg_file_path)
@@ -315,11 +317,11 @@ void Control::SetModeIdle() {
     m_pimpl->SetModeIdle();
 }
 
-const SystemStatus& Control::GetStatus() const {
+const std::atomic<SystemStatus>& Control::GetStatus() const {
     return m_pimpl->GetStatus();
 }
 
-const SystemInfo& Control::GetSystemInfo() const {
+const std::atomic<SystemInfo>& Control::GetSystemInfo() const {
     return m_pimpl->GetSystemInfo();
 }
 

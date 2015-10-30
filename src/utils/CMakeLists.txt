@@ -8,6 +8,7 @@ target_link_libraries(servoexample
     ${Boost_LOG_LIBRARY}
     ${Boost_LOG_SETUP_LIBRARY}
     ${Boost_SYSTEM_LIBRARY}
+    atomic
     pthread
 )
 

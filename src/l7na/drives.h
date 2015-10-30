@@ -50,14 +50,14 @@ enum AxisState {
 
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
-    std::atomic<int32_t>    target_position;        //!< Целевая позиция [импульсы энкодера]
-    std::atomic<int32_t>    cur_position;           //!< Текущая позиция [импульсы энкодера]
-    std::atomic<int32_t>    target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
-    std::atomic<int32_t>    cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
-    std::atomic<int32_t>    cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
-    std::atomic<int32_t>    cur_temperature;        //!< Текущая температура для сервоусилителя
-    std::atomic<AxisState>  state;                  //!< Текущее состояние системы управления осью
-    std::atomic<uint32_t>   error_code;             //!< Код ошибки двигателя по CiA402
+    int32_t    target_position;        //!< Целевая позиция [импульсы энкодера]
+    int32_t    cur_position;           //!< Текущая позиция [импульсы энкодера]
+    int32_t    target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
+    int32_t    cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
+    int32_t    cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
+    int32_t    cur_temperature;        //!< Текущая температура для сервоусилителя
+    AxisState  state;                  //!< Текущее состояние системы управления осью
+    uint32_t   error_code;             //!< Код ошибки двигателя по CiA402
 };
 
 enum SystemState {
@@ -157,13 +157,13 @@ public:
      *
      *  @return Структуру Status, заполненную актуальными данными.
      */
-    const SystemStatus& GetStatus() const;
+    const std::atomic<SystemStatus>& GetStatus() const;
 
     /*! @brief Получаем статические параметры системы (не изменяющиеся с течением времени).
      *
      *  @return Структуру SystemInfo, заполненную актуальными данными.
      */
-    const SystemInfo& GetSystemInfo() const;
+    const std::atomic<SystemInfo>& GetSystemInfo() const;
 
 private:
     class Impl;
