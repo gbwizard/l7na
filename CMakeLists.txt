@@ -20,7 +20,7 @@ if (POLICY CMP0054)
 endif()
 
 # Настройка boost
-set(BOOST_VERSION 1.56.0)
+set(BOOST_VERSION 1.54.0)
 set(Boost_DEBUG OFF)                                        # Дебаг поиска библиотек Буста
 set(Boost_DETAILED_FAILURE_MSG ON)                          # Детализированый репорт об ошибках
 add_definitions(-DBOOST_LOG_USE_NATIVE_SYSLOG)              # Используем родной сислог
@@ -113,7 +113,7 @@ if (CMAKE_COMPILER_IS_GNUCC)
     string(REGEX REPLACE "\n" "" PROJECT_COMPILER_VERSION ${GCC_CXX_VERSION})
 
     # Для GCC требуем версию компилятора не ниже указаной.
-    set(PROJECT_MIN_GCC_VERSION 4.8.1)
+    set(PROJECT_MIN_GCC_VERSION 4.8)
     if (PROJECT_COMPILER_VERSION VERSION_LESS ${PROJECT_MIN_GCC_VERSION})
        message(FATAL_ERROR "GCC version ${PROJECT_COMPILER_VERSION} is below ${PROJECT_MIN_GCC_VERSION}.")
     endif()
@@ -186,30 +186,10 @@ find_package(Boost ${BOOST_VERSION} REQUIRED
     chrono
     date_time
     filesystem
-    iostreams
     log
     log_setup
     program_options
-#    python
-    random
-    regex
-    serialization
-    signals
     system
-    thread
-#    unit_test_framework
-#    locale
-)
-
-# Gtest не версионируется
-find_package(GTest REQUIRED)
-
-set(LIBS_THREADING ${Boost_THREAD_LIBRARY} ${Boost_SYSTEM_LIBRARY} pthread rt)
-set(LIBS_LOGGING ${Boost_LOG_SETUP_LIBRARY} ${Boost_LOG_LIBRARY})
-
-set(LIBS_TEST
-    ${GTEST_BOTH_LIBRARIES}
-    pthread rt #pthread нужен самому GTest
 )
 
 add_subdirectory(src)
