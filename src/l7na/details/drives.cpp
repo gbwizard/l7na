@@ -28,8 +28,9 @@ public:
         LOG_INFO("Master released");
 
         if (m_thread) {
-            m_stop_flag.store(true, std::memory_order_release);
+            m_stop_flag.store(true, std::memory_order_relaxed);
             m_thread->join();
+            m_thread.reset();
         }
     }
 
@@ -205,7 +206,6 @@ protected:
         bool op_state = false;
         uint32_t cycle_cnt = 0;
 
-
         while (! op_state) {
             // Receive data from slaves
             ecrt_master_receive(m_master);
@@ -238,7 +238,7 @@ protected:
            std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
         }
 
-        while (m_stop_flag.load(std::memory_order_acquire)) {
+        while (m_stop_flag.load(std::memory_order_consume)) {
             // Receive data from slaves
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
@@ -279,8 +279,8 @@ private:
     uint8_t*                        m_domain_data = nullptr;
     ec_slave_config_t*              m_slave_cfg[DRIVE_COUNT];
 
-    static constexpr uint32_t       kCyclePollingSleepUs = 100;
-    static constexpr uint32_t       kRegPerDriveCount = 12;
+    static const uint32_t           kCyclePollingSleepUs;
+    static const uint32_t           kRegPerDriveCount;
 
     uint32_t                        m_offrw_ctrl[DRIVE_COUNT];
     uint32_t                        m_offro_status[DRIVE_COUNT];
@@ -294,6 +294,9 @@ private:
     uint32_t                        m_offrw_act_mode[DRIVE_COUNT];
     uint32_t                        m_offro_act_torq[DRIVE_COUNT];
  };
+
+const uint32_t  Control::Impl::kCyclePollingSleepUs = 100;
+const uint32_t  Control::Impl::kRegPerDriveCount = 12;
 
 Control::Control(const char* cfg_file_path)
     : m_pimpl(new Control::Impl(cfg_file_path))
