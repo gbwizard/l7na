@@ -206,9 +206,9 @@ protected:
 
     void CyclicPolling() {
         bool op_state = false;
-        uint32_t cycle_cnt = 0;
+        uint64_t cycle_cnt = 0;
 
-        while (! op_state || m_stop_flag.load(std::memory_order_consume)) {
+        while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
             // Receive data from slaves
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
@@ -242,7 +242,8 @@ protected:
            std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
         }
 
-        while (m_stop_flag.load(std::memory_order_consume)) {
+        cycle_cnt = 0;
+        while (! m_stop_flag.load(std::memory_order_consume)) {
             // Receive data from slaves
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
@@ -250,6 +251,11 @@ protected:
             // Send queued data
             ecrt_domain_queue(m_domain);
             ecrt_master_send(m_master);
+
+            ++cycle_cnt;
+            if (cycle_cnt % 10000 == 0) {
+                LOG_DEBUG("Cycle count = " << cycle_cnt);
+            }
 
             std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
         }
