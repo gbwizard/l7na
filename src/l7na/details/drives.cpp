@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cmath>
 #include <thread>
 #include <chrono>
 #include <functional>
@@ -187,6 +188,10 @@ protected:
             s.azimuth.state = AxisState::AXIS_INIT;
             s.elevation.state = AxisState::AXIS_INIT;
             m_sys_status.store(s);
+
+            for (uint32_t d = 0; d < DRIVE_COUNT; ++d) {
+                m_tx_requested[d].store(false, std::memory_order_relaxed);
+            }
         } catch (const std::exception& ex) {
             LOG_ERROR(ex.what());
 
@@ -209,6 +214,7 @@ protected:
             tx_values.target_pos = 0;
 
             m_tx_values[AZIMUTH_DRIVE].store(tx_values);
+            m_tx_requested[AZIMUTH_DRIVE].store(true, std::memory_order_release);
         } else {
             // profile positon mode for azimuth drive
 
@@ -219,6 +225,7 @@ protected:
             tx_values.target_pos = azimuth_angle;
 
             m_tx_values[AZIMUTH_DRIVE].store(tx_values);
+            m_tx_requested[AZIMUTH_DRIVE].store(true, std::memory_order_release);
         }
 
         if (elevation_velocity) {
@@ -231,6 +238,7 @@ protected:
             tx_values.target_pos = 0;
 
             m_tx_values[ELEVATION_DRIVE].store(tx_values);
+            m_tx_requested[ELEVATION_DRIVE].store(true, std::memory_order_release);
         } else {
             // profile positon mode for elevation drive
 
@@ -241,6 +249,7 @@ protected:
             tx_values.target_pos = elevation_angle;
 
             m_tx_values[ELEVATION_DRIVE].store(tx_values);
+            m_tx_requested[ELEVATION_DRIVE].store(true, std::memory_order_release);
         }
     }
 
@@ -253,6 +262,7 @@ protected:
             tx_values.target_pos = 0;
 
             m_tx_values[AZIMUTH_DRIVE].store(tx_values);
+            m_tx_requested[AZIMUTH_DRIVE].store(true, std::memory_order_release);
         }
 
         if (elevation_flag) {
@@ -263,6 +273,7 @@ protected:
             tx_values.target_pos = 0;
 
             m_tx_values[ELEVATION_DRIVE].store(tx_values);
+            m_tx_requested[ELEVATION_DRIVE].store(true, std::memory_order_release);
         }
     }
 
@@ -279,7 +290,7 @@ protected:
         uint64_t cycle_cnt = 0;
 
         while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
-            // Receive data from slaves
+            // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
@@ -306,11 +317,18 @@ protected:
            }
 
            // Send queued data
-           ecrt_domain_queue(m_domain);     // MARK THE DOMAIN DATA AS READY FOR EXCHANGE
-           ecrt_master_send(m_master);      // SEND ALL QUEUED DATAGRAMS
+           ecrt_domain_queue(m_domain);     // Помечаем данные как готовые к отправке
+           ecrt_master_send(m_master);      // Отправляем все датаграммы, помещенные в очередь
 
            std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
         }
+
+        // Устанавливаем статус системы в IDLE
+        SystemStatus s;
+        s.state = SystemState::SYSTEM_OK;
+        s.azimuth.state = AxisState::AXIS_IDLE;
+        s.elevation.state = AxisState::AXIS_IDLE;
+        m_sys_status.store(s);
 
         cycle_cnt = 0;
         while (! m_stop_flag.load(std::memory_order_consume)) {
@@ -319,8 +337,10 @@ protected:
             ecrt_domain_process(m_domain);
 
             // Обрабатываем пришедшие данные
+            process_received_data();
 
             // Если есть новые команды - передаем их подчиненным
+            prepare_new_commands();
 
             // Отправляем данные подчиненным
             ecrt_domain_queue(m_domain);
@@ -339,6 +359,77 @@ protected:
     }
 
 private:
+    void process_received_data() {
+        SystemStatus sys;
+
+        // Читаем данные для азимутального двигателя
+        sys.azimuth.cur_position = EC_READ_S32(m_domain_data + m_offro_act_pos[AZIMUTH_DRIVE]) % kEncoderResolution;
+        sys.azimuth.target_position = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_DRIVE]) % kEncoderResolution;
+        sys.azimuth.demand_position = EC_READ_S32(m_domain_data + m_offro_dmd_pos[AZIMUTH_DRIVE]) % kEncoderResolution;
+        sys.azimuth.cur_velocity = EC_READ_S32(m_domain_data + m_offro_act_vel[AZIMUTH_DRIVE]);
+        sys.azimuth.target_velocity = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[AZIMUTH_DRIVE]);
+        sys.azimuth.demand_velocity = EC_READ_S32(m_domain_data + m_offro_dmd_vel[AZIMUTH_DRIVE]);
+        sys.azimuth.cur_torque = EC_READ_S16(m_domain_data + m_offro_act_torq[AZIMUTH_DRIVE]);
+        sys.azimuth.statusword = EC_READ_U16(m_domain_data + m_offro_status[AZIMUTH_DRIVE]);
+        const int8_t cur_azimuth_mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[AZIMUTH_DRIVE]);
+        if (cur_azimuth_mode == 1) {
+            sys.azimuth.state = AxisState::AXIS_POINT;
+        } else if (cur_azimuth_mode == 3) {
+            sys.azimuth.state = AxisState::AXIS_SCAN;
+        } else {
+            sys.azimuth.state = AxisState::AXIS_IDLE;
+        }
+        //! @todo Читать из регистра 0x603F
+        sys.azimuth.error_code = 0;
+
+        // Читаем данные для угломестного двигателя
+        sys.elevation.cur_position = EC_READ_S32(m_domain_data + m_offro_act_pos[ELEVATION_DRIVE]) % kEncoderResolution;
+        sys.elevation.target_position = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_DRIVE]) % kEncoderResolution;
+        sys.elevation.demand_position = EC_READ_S32(m_domain_data + m_offro_dmd_pos[ELEVATION_DRIVE]) % kEncoderResolution;
+        sys.elevation.cur_velocity = EC_READ_S32(m_domain_data + m_offro_act_vel[ELEVATION_DRIVE]);
+        sys.elevation.target_velocity = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[ELEVATION_DRIVE]);
+        sys.elevation.demand_velocity = EC_READ_S32(m_domain_data + m_offro_dmd_vel[ELEVATION_DRIVE]);
+        sys.elevation.cur_torque = EC_READ_S16(m_domain_data + m_offro_act_torq[ELEVATION_DRIVE]);
+        sys.elevation.statusword = EC_READ_U16(m_domain_data + m_offro_status[ELEVATION_DRIVE]);
+        const int8_t cur_elevaion_mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[ELEVATION_DRIVE]);
+        if (cur_elevaion_mode == 1) {
+            sys.elevation.state = AxisState::AXIS_POINT;
+        } else if (cur_elevaion_mode == 3) {
+            sys.elevation.state = AxisState::AXIS_SCAN;
+        } else {
+            sys.elevation.state = AxisState::AXIS_IDLE;
+        }
+        //! @todo Читать из регистра 0x603F
+        sys.elevation.error_code = 0;
+
+        //! @todo Выставлять исходя из состояний двигателей
+        sys.state = SystemState::SYSTEM_OK;
+
+        m_sys_status.store(sys, std::memory_order_relaxed);
+    }
+
+    void prepare_new_commands() {
+        if (m_tx_requested[AZIMUTH_DRIVE].load(std::memory_order_acquire)) {
+            const TXValues txv_azimuth = m_tx_values[AZIMUTH_DRIVE].load(std::memory_order_relaxed);
+            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_DRIVE], txv_azimuth.op_mode);
+            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_DRIVE], txv_azimuth.controlword);
+            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_DRIVE], txv_azimuth.target_pos);
+            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[AZIMUTH_DRIVE], txv_azimuth.target_vel);
+
+            m_tx_requested[AZIMUTH_DRIVE].store(false, std::memory_order_relaxed);
+        }
+
+        if (m_tx_requested[ELEVATION_DRIVE].load(std::memory_order_acquire)) {
+            const TXValues txv_azimuth = m_tx_values[ELEVATION_DRIVE].load(std::memory_order_relaxed);
+            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_DRIVE], txv_azimuth.op_mode);
+            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_DRIVE], txv_azimuth.controlword);
+            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_DRIVE], txv_azimuth.target_pos);
+            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[ELEVATION_DRIVE], txv_azimuth.target_vel);
+
+            m_tx_requested[ELEVATION_DRIVE].store(false, std::memory_order_relaxed);
+        }
+    }
+
     enum : uint32_t {
         ELEVATION_DRIVE = 0,
         AZIMUTH_DRIVE,
@@ -369,6 +460,7 @@ private:
     std::atomic<bool>               m_stop_flag;    //!< Флаг остановки потока взаимодействия
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
     std::atomic<TXValues>           m_tx_values[DRIVE_COUNT];
+    std::atomic<bool>               m_tx_requested[DRIVE_COUNT];
 
     //! Структуры для обмена данными по EtherCAT
     ec_master_t*                    m_master = nullptr;
@@ -380,6 +472,7 @@ private:
 
     static const uint32_t           kCyclePollingSleepUs;
     static const uint32_t           kRegPerDriveCount;
+    static const uint32_t           kEncoderResolution;
 
     uint32_t                        m_offrw_ctrl[DRIVE_COUNT];
     uint32_t                        m_offro_status[DRIVE_COUNT];
@@ -394,8 +487,9 @@ private:
     uint32_t                        m_offro_act_torq[DRIVE_COUNT];
  };
 
-const uint32_t  Control::Impl::kCyclePollingSleepUs = 500;
-const uint32_t  Control::Impl::kRegPerDriveCount = 12;
+const uint32_t Control::Impl::kCyclePollingSleepUs = 500;
+const uint32_t Control::Impl::kRegPerDriveCount = 12;
+const uint32_t Control::Impl::kEncoderResolution = std::pow(2, 20);
 
 Control::Control(const char* cfg_file_path)
     : m_pimpl(new Control::Impl(cfg_file_path))

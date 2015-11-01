@@ -54,22 +54,25 @@ struct AxisStatus {
     AxisStatus() noexcept
         : target_position(0)
         , cur_position(0)
+        , demand_position(0)
         , target_velocity(0)
         , cur_velocity(0)
+        , demand_velocity(0)
         , cur_torque(0)
-        , cur_temperature(0)
         , state(AxisState::AXIS_OFF)
         , error_code(0)
     {}
 
-    int32_t    target_position;        //!< Целевая позиция [импульсы энкодера]
-    int32_t    cur_position;           //!< Текущая позиция [импульсы энкодера]
-    int32_t    target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
-    int32_t    cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
-    int32_t    cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
-    int32_t    cur_temperature;        //!< Текущая температура для сервоусилителя
-    AxisState  state;                  //!< Текущее состояние системы управления осью
-    uint32_t   error_code;             //!< Код ошибки двигателя по CiA402
+    int32_t     target_position;        //!< Целевая позиция [импульсы энкодера]
+    int32_t     cur_position;           //!< Текущая позиция [импульсы энкодера]
+    int32_t     demand_position;        //!< Запрашиваемая позиция [импульсы энкодера]
+    int32_t     target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
+    int32_t     cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
+    int32_t     demand_velocity;        //!< Запрашиваемая скорость [импульсы энкодера/c]
+    int32_t     cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
+    AxisState   state;                  //!< Текущее состояние системы управления осью
+    uint32_t    error_code;             //!< Код ошибки двигателя по CiA402
+    uint16_t    statusword;             //!< Битовая маска текущего состояния привода
 };
 
 enum class SystemState : int32_t {
@@ -98,6 +101,7 @@ struct SystemStatus {
 struct AxisInfo {
     AxisInfo() noexcept
         : encoder_type(4)
+        , cur_temperature(0)
         , dev_name()
         , hw_version()
         , sw_version()
@@ -112,6 +116,7 @@ struct AxisInfo {
      * 5 - Serial type Abs encoder (24-bit)
      */
     uint16_t        encoder_type;
+    int32_t         cur_temperature;    //!< Текущая температура для сервоусилителя
     std::string     dev_name;           //!< Название устройства
     std::string     hw_version;         //!< Версия аппаратного обепечения
     std::string     sw_version;         //!< Версия программного обеспечения
