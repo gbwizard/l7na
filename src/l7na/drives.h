@@ -40,12 +40,13 @@
 namespace Drives {
 
 //! @brief Возможные состояния каждого двигателя
-enum AxisState {
-    STATE_OFF = 0,                  //!< Выключен (до вызова Init или после вызова Release)
-    STATE_IDLE,                     //!< Включен, готов к работе
-    STATE_SCAN,                     //!< Работает в режиме "Сканирование"
-    STATE_POINT,                    //!< Работает в режиме "Установка в точку"
-    STATE_ERROR                     //!< Состояние ошибки
+enum class AxisState : int32_t {
+    AXIS_OFF = -1,                   //!< Выключен (до вызова Init или после вызова Release)
+    AXIS_INIT,                      //!< Инициализируется
+    AXIS_IDLE,                      //!< Включен, готов к работе
+    AXIS_SCAN,                      //!< Работает в режиме "Сканирование"
+    AXIS_POINT,                     //!< Работает в режиме "Установка в точку"
+    AXIS_ERROR                      //!< Состояние ошибки
 };
 
 //! @brief Текущие значения для одной оси системы
@@ -57,7 +58,7 @@ struct AxisStatus {
         , cur_velocity(0)
         , cur_torque(0)
         , cur_temperature(0)
-        , state(STATE_OFF)
+        , state(AxisState::AXIS_OFF)
         , error_code(0)
     {}
 
@@ -71,9 +72,10 @@ struct AxisStatus {
     uint32_t   error_code;             //!< Код ошибки двигателя по CiA402
 };
 
-enum SystemState {
+enum class SystemState : int32_t {
     SYSTEM_OFF = -1,
     SYSTEM_OK = 0,
+    SYSTEM_INIT,
     SYSTEM_ERROR
 };
 
@@ -82,7 +84,7 @@ struct SystemStatus {
     SystemStatus() noexcept
         : azimuth()
         , elevation()
-        , state(SYSTEM_OFF)
+        , state(SystemState::SYSTEM_OFF)
         , error_str()
     {}
 
@@ -178,10 +180,13 @@ public:
 
     /*! @brief Переключает систему управления в режим бездейсвтия.
      *
+     *  @param  azimuth_flag        Флаг перевода в режим бездействия двигателя по азимуту
+     *  @param  elevation_flag      Флаг перевода в режим бездействия двигателя по азимуту
+     *
      *  @attention При возникновении ошибки этот вызов также сбрасывает состояние ошибки
      *             и приводит систему в состояние готовности к дальнейшей работе.
      */
-    void SetModeIdle();
+    void SetModeIdle(bool azimuth_flag, bool elevation_flag);
 
     /*! @brief Получаем текущее состояние системы управления (динамически изменяемые)
      *

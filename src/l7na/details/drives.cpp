@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <thread>
 #include <chrono>
 #include <functional>
@@ -98,7 +99,7 @@ protected:
             };
 
             // RxPDO
-            ec_pdo_entry_info_t l7na_rx_channel1[] = {
+            ec_pdo_entry_info_t l7na_rx_channel[] = {
                 {0x6040, 0, 16},    // Controlword
                 {0x6060, 0, 8},     // Actual mode of operation
                 {0x607A, 0, 32},    // Target position
@@ -107,7 +108,7 @@ protected:
             };
 
             ec_pdo_info_t l7na_rx_pdos[] = {
-                {0x1600, 5, l7na_rx_channel1}
+                {0x1600, 5, l7na_rx_channel}
             };
 
             // Конфигурация SyncManagers 2 (FMMU0) и 3 (FMMU1)
@@ -179,21 +180,90 @@ protected:
             m_thread.reset(new std::thread(std::bind(&Impl::CyclicPolling, this)));
 
             LOG_INFO("Cyclic polling thread started");
+
+            // Записываем состояние системы
+            SystemStatus s;
+            s.state = SystemState::SYSTEM_INIT;
+            s.azimuth.state = AxisState::AXIS_INIT;
+            s.elevation.state = AxisState::AXIS_INIT;
+            m_sys_status.store(s);
         } catch (const std::exception& ex) {
             LOG_ERROR(ex.what());
+
+            // Записываем сотояние системы
             SystemStatus s;
-            s.state = SYSTEM_ERROR;
+            s.state = SystemState::SYSTEM_ERROR;
             s.error_str = ex.what();
             m_sys_status.store(s);
         }
     }
 
     void SetModeRun(int32_t azimuth_angle, int32_t azimuth_velocity, int32_t elevation_angle, int32_t elevation_velocity) {
-        ;
+        if (azimuth_velocity) {
+            // profile velocity mode for azimuth drive
+
+            TXValues tx_values;
+            tx_values.controlword = 0xF;
+            tx_values.op_mode = 3;
+            tx_values.target_vel = azimuth_velocity;
+            tx_values.target_pos = 0;
+
+            m_tx_values[AZIMUTH_DRIVE].store(tx_values);
+        } else {
+            // profile positon mode for azimuth drive
+
+            TXValues tx_values;
+            tx_values.controlword = 0xF;
+            tx_values.op_mode = 1;
+            tx_values.target_vel = 0;
+            tx_values.target_pos = azimuth_angle;
+
+            m_tx_values[AZIMUTH_DRIVE].store(tx_values);
+        }
+
+        if (elevation_velocity) {
+            // profile velocity mode for elevation drive
+
+            TXValues tx_values;
+            tx_values.controlword = 0xF;
+            tx_values.op_mode = 3;
+            tx_values.target_vel = elevation_velocity;
+            tx_values.target_pos = 0;
+
+            m_tx_values[ELEVATION_DRIVE].store(tx_values);
+        } else {
+            // profile positon mode for elevation drive
+
+            TXValues tx_values;
+            tx_values.controlword = 0xF;
+            tx_values.op_mode = 1;
+            tx_values.target_vel = 0;
+            tx_values.target_pos = elevation_angle;
+
+            m_tx_values[ELEVATION_DRIVE].store(tx_values);
+        }
     }
 
-    void SetModeIdle() {
-        ;
+    void SetModeIdle(bool azimuth_flag, bool elevation_flag) {
+        if (azimuth_flag) {
+            TXValues tx_values;
+            tx_values.controlword = 0x6;
+            tx_values.op_mode = 0;
+            tx_values.target_vel = 0;
+            tx_values.target_pos = 0;
+
+            m_tx_values[AZIMUTH_DRIVE].store(tx_values);
+        }
+
+        if (elevation_flag) {
+            TXValues tx_values;
+            tx_values.controlword = 0x6;
+            tx_values.op_mode = 0;
+            tx_values.target_vel = 0;
+            tx_values.target_pos = 0;
+
+            m_tx_values[ELEVATION_DRIVE].store(tx_values);
+        }
     }
 
     const std::atomic<SystemStatus>& GetStatus() const {
@@ -244,11 +314,15 @@ protected:
 
         cycle_cnt = 0;
         while (! m_stop_flag.load(std::memory_order_consume)) {
-            // Receive data from slaves
+            // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
-            // Send queued data
+            // Обрабатываем пришедшие данные
+
+            // Если есть новые команды - передаем их подчиненным
+
+            // Отправляем данные подчиненным
             ecrt_domain_queue(m_domain);
             ecrt_master_send(m_master);
 
@@ -272,6 +346,20 @@ private:
         DRIVE_COUNT
     };
 
+    struct TXValues {
+        TXValues() noexcept
+            : target_pos(0)
+            , target_vel(0)
+            , controlword(0)
+            , op_mode(0)
+        {}
+
+        int32_t target_pos;
+        int32_t target_vel;
+        uint16_t controlword;
+        uint8_t op_mode;
+    };
+
     fs::path                        m_cfg_path;     //!< Путь к файлу конфигурации
     std::map<uint16_t, int64_t>     m_sdo_cfg;      //!< Конфигурация SDO
     std::atomic<SystemInfo>         m_sys_info;     //!< Структура с статической информацией о системе
@@ -279,7 +367,8 @@ private:
 
     //! Данные для взаимодействия с потоком циклического взаимодействия с сервоусилителями
     std::atomic<bool>               m_stop_flag;    //!< Флаг остановки потока взаимодействия
-    std::unique_ptr<std::thread>    m_thread;               //!< Поток циклического обмена данными со сервоусилителями
+    std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
+    std::atomic<TXValues>           m_tx_values[DRIVE_COUNT];
 
     //! Структуры для обмена данными по EtherCAT
     ec_master_t*                    m_master = nullptr;
@@ -319,8 +408,8 @@ void Control::SetModeRun(int32_t azimuth_angle, int32_t azimuth_velocity, int32_
     m_pimpl->SetModeRun(azimuth_angle, azimuth_velocity, elevation_angle, elevation_velocity);
 }
 
-void Control::SetModeIdle() {
-    m_pimpl->SetModeIdle();
+void Control::SetModeIdle(bool azimuth_flag, bool elevation_flag) {
+    m_pimpl->SetModeIdle(azimuth_flag, elevation_flag);
 }
 
 const std::atomic<SystemStatus>& Control::GetStatus() const {
