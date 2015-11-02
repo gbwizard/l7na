@@ -31,9 +31,10 @@ public:
         }
 
         // Освобождаем мастер-объект
-        ecrt_release_master(m_master);
-
-        LOG_INFO("Master released");
+        if (m_master) {
+            ecrt_release_master(m_master);
+            LOG_INFO("Master released");
+        }
     }
 
 protected:
