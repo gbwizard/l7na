@@ -372,6 +372,7 @@ private:
         sys.azimuth.tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[AZIMUTH_AXIS]);
         sys.azimuth.dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[AZIMUTH_AXIS]);
         sys.azimuth.cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[AZIMUTH_AXIS]);
+        sys.azimuth.ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS]);
         sys.azimuth.statusword = EC_READ_U16(m_domain_data + m_offro_status[AZIMUTH_AXIS]);
         sys.azimuth.mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS]);
         if (sys.azimuth.mode == 1) {
@@ -394,6 +395,7 @@ private:
         sys.elevation.tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[ELEVATION_AXIS]);
         sys.elevation.dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[ELEVATION_AXIS]);
         sys.elevation.cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[ELEVATION_AXIS]);
+        sys.elevation.ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS]);
         sys.elevation.statusword = EC_READ_U16(m_domain_data + m_offro_status[ELEVATION_AXIS]);
         sys.elevation.mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS]);
         if (sys.elevation.mode == 1) {

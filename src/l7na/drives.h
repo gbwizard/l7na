@@ -44,8 +44,8 @@ enum Axis: int32_t {
     AXIS_NONE = -1,
 
     AXIS_MIN = 0,
-    AZIMUTH_AXIS = 0,
-    ELEVATION_AXIS,
+    ELEVATION_AXIS = 0,
+    AZIMUTH_AXIS,
 
     AXIS_COUNT
 };
@@ -72,6 +72,7 @@ struct AxisStatus {
         , cur_torq(0)
         , state(AxisState::AXIS_OFF)
         , error_code(0)
+        , ctrlword(0)
         , statusword(0)
         , mode(0)
     {}
@@ -85,6 +86,7 @@ struct AxisStatus {
     int32_t     cur_torq;               //!< Текущий момент [единиц 0,1% от _номинального_ момента двигателя]
     AxisState   state;                  //!< Текущее состояние системы управления осью
     uint32_t    error_code;             //!< Код ошибки двигателя по CiA402
+    uint16_t    ctrlword;               //!< Битовая маска управления приводом (для отладки)
     uint16_t    statusword;             //!< Битовая маска текущего состояния привода (для отладки)
     uint16_t    mode;                   //!< Текущий режим работы (для отладки)
 };
