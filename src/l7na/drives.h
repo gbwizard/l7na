@@ -86,7 +86,7 @@ struct AxisStatus {
     AxisState   state;                  //!< Текущее состояние системы управления осью
     uint32_t    error_code;             //!< Код ошибки двигателя по CiA402
     uint16_t    statusword;             //!< Битовая маска текущего состояния привода (для отладки)
-    uint16_t     mode;                   //!< Текущий режим работы (для отладки)
+    uint16_t    mode;                   //!< Текущий режим работы (для отладки)
 };
 
 enum SystemState : int32_t {
@@ -104,11 +104,6 @@ struct SystemStatus {
         , state(SystemState::SYSTEM_OFF)
         //, error_str()
     {}
-
-    ~SystemStatus() {
-        int a = 0;
-        a++;
-    }
 
     AxisStatus azimuth;             //!< Статус двигателя по азимуту
     AxisStatus elevation;           //!< Статус двигателя по углу места

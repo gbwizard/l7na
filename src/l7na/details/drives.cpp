@@ -416,21 +416,37 @@ private:
 
     void prepare_new_commands() {
         if (m_tx_requested[AZIMUTH_AXIS].load(std::memory_order_acquire)) {
-            const TXValues txv_azimuth = m_tx_values[AZIMUTH_AXIS].load(std::memory_order_relaxed);
-            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv_azimuth.op_mode);
-            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv_azimuth.controlword);
-            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_AXIS], txv_azimuth.target_pos);
-            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[AZIMUTH_AXIS], txv_azimuth.target_vel);
+            const TXValues txv = m_tx_values[AZIMUTH_AXIS].load(std::memory_order_relaxed);
+            if (txv.op_mode == 0) {
+                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv.op_mode);
+                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv.controlword);
+            } else if (txv.op_mode == 1) {
+                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv.op_mode);
+                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv.controlword);
+                EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_AXIS], txv.target_pos);
+            } else if (txv.op_mode == 3) {
+                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv.op_mode);
+                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv.controlword);
+                EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[AZIMUTH_AXIS], txv.target_vel);
+            }
 
             m_tx_requested[AZIMUTH_AXIS].store(false, std::memory_order_relaxed);
         }
 
         if (m_tx_requested[ELEVATION_AXIS].load(std::memory_order_acquire)) {
-            const TXValues txv_azimuth = m_tx_values[ELEVATION_AXIS].load(std::memory_order_relaxed);
-            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv_azimuth.op_mode);
-            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv_azimuth.controlword);
-            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_AXIS], txv_azimuth.target_pos);
-            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[ELEVATION_AXIS], txv_azimuth.target_vel);
+            const TXValues txv = m_tx_values[ELEVATION_AXIS].load(std::memory_order_relaxed);
+            if (txv.op_mode == 0) {
+                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv.op_mode);
+                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv.controlword);
+            } else if (txv.op_mode == 1) {
+                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv.op_mode);
+                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv.controlword);
+                EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_AXIS], txv.target_pos);
+            } else if (txv.op_mode == 3) {
+                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv.op_mode);
+                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv.controlword);
+                EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[ELEVATION_AXIS], txv.target_vel);
+            }
 
             m_tx_requested[ELEVATION_AXIS].store(false, std::memory_order_relaxed);
         }
