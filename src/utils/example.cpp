@@ -5,6 +5,7 @@
 #include <boost/tokenizer.hpp>
 
 #include "l7na/drives.h"
+#include "l7na/details/logger.h"
 
 struct Command {
     Drives::Axis axis = Drives::AZIMUTH_AXIS;
@@ -101,6 +102,8 @@ void print_status(const Drives::SystemStatus& status) {
 }
 
 int main(int argc, char* argv[]) {
+    common::InitLogger(boost::log::trivial::error, "%LineID% %TimeStamp% (%ProcessID%:%ThreadID%) [%Severity%] : <%Channel%> %Message%");
+
     Drives::Control control("");
 
     std::cout << "Please, specify your commands here:" << std::endl;

@@ -400,10 +400,10 @@ private:
             sys.elevation.state = AxisState::AXIS_POINT;
         } else if (sys.elevation.mode == 3) {
             sys.elevation.state = AxisState::AXIS_SCAN;
-        } else if (sys.azimuth.mode == 0) {
+        } else if (sys.elevation.mode == 0) {
             sys.elevation.state = AxisState::AXIS_IDLE;
         } else {
-            sys.azimuth.state = AxisState::AXIS_ERROR;
+            sys.elevation.state = AxisState::AXIS_ERROR;
         }
         //! @todo Читать из регистра 0x603F
         sys.elevation.error_code = 0;
@@ -486,7 +486,7 @@ private:
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
  };
 
-const uint32_t Control::Impl::kCyclePollingSleepUs = 500;
+const uint32_t Control::Impl::kCyclePollingSleepUs = 800;
 const uint32_t Control::Impl::kRegPerDriveCount = 12;
 const uint32_t Control::Impl::kPositionMaxValue = std::pow(2, 20);
 

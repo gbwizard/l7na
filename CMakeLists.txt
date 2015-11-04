@@ -190,6 +190,7 @@ find_package(Boost ${BOOST_VERSION} REQUIRED
     log_setup
     program_options
     system
+    thread
 )
 
 add_subdirectory(src)
