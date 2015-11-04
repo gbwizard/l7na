@@ -68,15 +68,15 @@ protected:
             }
 
             // Создаем объекты конфигурации подчиненных.
-            for (uint32_t d = 0; d < DRIVE_COUNT; ++d) {
+            for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
                 m_slave_cfg[d] = ecrt_master_slave_config(m_master, 0, d, 0x00007595, 0x00000000);
             }
-            const bool all_slave_configs_ok = std::all_of(&m_slave_cfg[0], &m_slave_cfg[DRIVE_COUNT], [](const ec_slave_config_t* const sc) -> bool {
+            const bool all_slave_configs_ok = std::all_of(&m_slave_cfg[0], &m_slave_cfg[AXIS_COUNT], [](const ec_slave_config_t* const sc) -> bool {
                 return sc;
             });
 
             if (all_slave_configs_ok) {
-                LOG_INFO("Slave configuration objects (" << DRIVE_COUNT << ") created");
+                LOG_INFO("Slave configuration objects (" << AXIS_COUNT << ") created");
             } else {
                 BOOST_THROW_EXCEPTION(Exception("Failed to create some slave configuration"));
             }
@@ -123,7 +123,7 @@ protected:
             };
 
             // Конфиугурируем PDO для подчиненных
-            for (uint32_t d = 0; d < DRIVE_COUNT; ++d) {
+            for (uint32_t d = AXIS_MIN; d < AXIS_COUNT; ++d) {
                 if (ecrt_slave_config_pdos(m_slave_cfg[d], EC_END, l7na_syncs)) {
                     BOOST_THROW_EXCEPTION(Exception("Failed to configure slave #") << d << " pdos");
                 }
@@ -132,29 +132,29 @@ protected:
             LOG_INFO("Configuring slave PDOs and sync managers done");
 
             static const ec_pdo_entry_reg_t kDomainPDOs[] = {
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x6040, 0, &m_offrw_ctrl[ELEVATION_DRIVE]},        //!< Control word
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x6041, 0, &m_offro_status[ELEVATION_DRIVE]},      //!< Status word
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x607A, 0, &m_offrw_tgt_pos[ELEVATION_DRIVE]},     //!< Target position
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x6062, 0, &m_offro_dmd_pos[ELEVATION_DRIVE]},     //!< Demand position
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x6064, 0, &m_offro_act_pos[ELEVATION_DRIVE]},     //!< Actual position
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[ELEVATION_DRIVE]},     //!< Target velocity
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[ELEVATION_DRIVE]},     //!< Demand velocity
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[ELEVATION_DRIVE]},     //!< Actual velocity
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[ELEVATION_DRIVE]},    //!< Profile velocity
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[ELEVATION_DRIVE]},    //!< Actual drive mode of operation
-                {0, ELEVATION_DRIVE, 0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[ELEVATION_DRIVE]},    //!< Actual torque
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6040, 0, &m_offrw_ctrl[ELEVATION_AXIS]},        //!< Control word
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6041, 0, &m_offro_status[ELEVATION_AXIS]},      //!< Status word
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x607A, 0, &m_offrw_tgt_pos[ELEVATION_AXIS]},     //!< Target position
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6062, 0, &m_offro_dmd_pos[ELEVATION_AXIS]},     //!< Demand position
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6064, 0, &m_offro_act_pos[ELEVATION_AXIS]},     //!< Actual position
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[ELEVATION_AXIS]},     //!< Target velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[ELEVATION_AXIS]},     //!< Demand velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[ELEVATION_AXIS]},     //!< Actual velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[ELEVATION_AXIS]},    //!< Profile velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[ELEVATION_AXIS]},    //!< Actual drive mode of operation
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[ELEVATION_AXIS]},    //!< Actual torque
 
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x6040, 0, &m_offrw_ctrl[AZIMUTH_DRIVE]},          //!< Control word
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x6041, 0, &m_offro_status[AZIMUTH_DRIVE]},        //!< Status word
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x607A, 0, &m_offrw_tgt_pos[AZIMUTH_DRIVE]},       //!< Target position
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x6062, 0, &m_offro_dmd_pos[AZIMUTH_DRIVE]},       //!< Demand position
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x6064, 0, &m_offro_act_pos[AZIMUTH_DRIVE]},       //!< Actual position
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[AZIMUTH_DRIVE]},       //!< Target velocity
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[AZIMUTH_DRIVE]},       //!< Demand velocity
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[AZIMUTH_DRIVE]},       //!< Actual velocity
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[AZIMUTH_DRIVE]},      //!< Profile velocity
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_DRIVE]},      //!< Actual drive mode of operation
-                {0, AZIMUTH_DRIVE,   0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[AZIMUTH_DRIVE]},      //!< Actual torque
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6040, 0, &m_offrw_ctrl[AZIMUTH_AXIS]},          //!< Control word
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6041, 0, &m_offro_status[AZIMUTH_AXIS]},        //!< Status word
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x607A, 0, &m_offrw_tgt_pos[AZIMUTH_AXIS]},       //!< Target position
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6062, 0, &m_offro_dmd_pos[AZIMUTH_AXIS]},       //!< Demand position
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6064, 0, &m_offro_act_pos[AZIMUTH_AXIS]},       //!< Actual position
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[AZIMUTH_AXIS]},       //!< Target velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[AZIMUTH_AXIS]},       //!< Demand velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[AZIMUTH_AXIS]},       //!< Actual velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[AZIMUTH_AXIS]},      //!< Profile velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_AXIS]},      //!< Actual drive mode of operation
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[AZIMUTH_AXIS]},      //!< Actual torque
 
                 {}
             };
@@ -190,7 +190,7 @@ protected:
             s.elevation.state = AxisState::AXIS_INIT;
             m_sys_status.store(s);
 
-            for (uint32_t d = 0; d < DRIVE_COUNT; ++d) {
+            for (uint32_t d = AXIS_MIN; d < AXIS_COUNT; ++d) {
                 m_tx_requested[d].store(false, std::memory_order_relaxed);
             }
         } catch (const std::exception& ex) {
@@ -204,77 +204,77 @@ protected:
         }
     }
 
-    void SetModeRun(int32_t azimuth_angle, int32_t azimuth_velocity, int32_t elevation_angle, int32_t elevation_velocity) {
-        if (azimuth_velocity) {
-            // profile velocity mode for azimuth drive
+    void SetModeRun(const Axis& axis, int32_t pos, int32_t vel) {
+        if (axis == AZIMUTH_AXIS) {
+            if (vel) {
+                // profile velocity mode for azimuth drive
 
-            TXValues tx_values;
-            tx_values.controlword = 0xF;
-            tx_values.op_mode = 3;
-            tx_values.target_vel = azimuth_velocity;
-            tx_values.target_pos = 0;
+                TXValues tx_values;
+                tx_values.controlword = 0xF;
+                tx_values.op_mode = 3;
+                tx_values.target_vel = vel;
+                tx_values.target_pos = 0;
 
-            m_tx_values[AZIMUTH_DRIVE].store(tx_values);
-            m_tx_requested[AZIMUTH_DRIVE].store(true, std::memory_order_release);
-        } else {
-            // profile positon mode for azimuth drive
+                m_tx_values[AZIMUTH_AXIS].store(tx_values);
+                m_tx_requested[AZIMUTH_AXIS].store(true, std::memory_order_release);
+            } else {
+                // profile positon mode for azimuth drive
 
-            TXValues tx_values;
-            tx_values.controlword = 0xF;
-            tx_values.op_mode = 1;
-            tx_values.target_vel = 0;
-            tx_values.target_pos = azimuth_angle;
+                TXValues tx_values;
+                tx_values.controlword = 0xF;
+                tx_values.op_mode = 1;
+                tx_values.target_vel = 0;
+                tx_values.target_pos = pos % kPositionMaxValue;
 
-            m_tx_values[AZIMUTH_DRIVE].store(tx_values);
-            m_tx_requested[AZIMUTH_DRIVE].store(true, std::memory_order_release);
-        }
+                m_tx_values[AZIMUTH_AXIS].store(tx_values);
+                m_tx_requested[AZIMUTH_AXIS].store(true, std::memory_order_release);
+            }
+        } else if (axis == ELEVATION_AXIS) {
+            if (vel) {
+                // profile velocity mode for elevation drive
 
-        if (elevation_velocity) {
-            // profile velocity mode for elevation drive
+                TXValues tx_values;
+                tx_values.controlword = 0xF;
+                tx_values.op_mode = 3;
+                tx_values.target_vel = vel;
+                tx_values.target_pos = 0;
 
-            TXValues tx_values;
-            tx_values.controlword = 0xF;
-            tx_values.op_mode = 3;
-            tx_values.target_vel = elevation_velocity;
-            tx_values.target_pos = 0;
+                m_tx_values[ELEVATION_AXIS].store(tx_values);
+                m_tx_requested[ELEVATION_AXIS].store(true, std::memory_order_release);
+            } else {
+                // profile positon mode for elevation drive
 
-            m_tx_values[ELEVATION_DRIVE].store(tx_values);
-            m_tx_requested[ELEVATION_DRIVE].store(true, std::memory_order_release);
-        } else {
-            // profile positon mode for elevation drive
+                TXValues tx_values;
+                tx_values.controlword = 0xF;
+                tx_values.op_mode = 1;
+                tx_values.target_vel = 0;
+                tx_values.target_pos = pos % kPositionMaxValue;
 
-            TXValues tx_values;
-            tx_values.controlword = 0xF;
-            tx_values.op_mode = 1;
-            tx_values.target_vel = 0;
-            tx_values.target_pos = elevation_angle;
-
-            m_tx_values[ELEVATION_DRIVE].store(tx_values);
-            m_tx_requested[ELEVATION_DRIVE].store(true, std::memory_order_release);
+                m_tx_values[ELEVATION_AXIS].store(tx_values);
+                m_tx_requested[ELEVATION_AXIS].store(true, std::memory_order_release);
+            }
         }
     }
 
-    void SetModeIdle(bool azimuth_flag, bool elevation_flag) {
-        if (azimuth_flag) {
+    void SetModeIdle(const Axis& axis) {
+        if (axis == AZIMUTH_AXIS) {
             TXValues tx_values;
             tx_values.controlword = 0x6;
             tx_values.op_mode = 0;
             tx_values.target_vel = 0;
             tx_values.target_pos = 0;
 
-            m_tx_values[AZIMUTH_DRIVE].store(tx_values);
-            m_tx_requested[AZIMUTH_DRIVE].store(true, std::memory_order_release);
-        }
-
-        if (elevation_flag) {
+            m_tx_values[AZIMUTH_AXIS].store(tx_values);
+            m_tx_requested[AZIMUTH_AXIS].store(true, std::memory_order_release);
+        } else if (axis == ELEVATION_AXIS) {
             TXValues tx_values;
             tx_values.controlword = 0x6;
             tx_values.op_mode = 0;
             tx_values.target_vel = 0;
             tx_values.target_pos = 0;
 
-            m_tx_values[ELEVATION_DRIVE].store(tx_values);
-            m_tx_requested[ELEVATION_DRIVE].store(true, std::memory_order_release);
+            m_tx_values[ELEVATION_AXIS].store(tx_values);
+            m_tx_requested[ELEVATION_AXIS].store(true, std::memory_order_release);
         }
     }
 
@@ -301,12 +301,12 @@ protected:
             ecrt_domain_state(m_domain, &m_domain_state);
 
             // Получаем статус подчиненных
-            ec_slave_config_state_t slave_cfg_state[DRIVE_COUNT];
-            for (uint32_t d = 0; d < DRIVE_COUNT; ++d) {
+            ec_slave_config_state_t slave_cfg_state[AXIS_COUNT];
+            for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
                 ecrt_slave_config_state(m_slave_cfg[d], &slave_cfg_state[d]);
             }
 
-            const bool all_slaves_up = std::all_of(&slave_cfg_state[0], &slave_cfg_state[DRIVE_COUNT], [](const ec_slave_config_state_t& scs) -> bool {
+            const bool all_slaves_up = std::all_of(&slave_cfg_state[0], &slave_cfg_state[AXIS_COUNT], [](const ec_slave_config_state_t& scs) -> bool {
                 return scs.operational;
             });
 
@@ -364,41 +364,45 @@ private:
         SystemStatus sys;
 
         // Читаем данные для азимутального двигателя
-        sys.azimuth.cur_position = EC_READ_S32(m_domain_data + m_offro_act_pos[AZIMUTH_DRIVE]) % kEncoderResolution;
-        sys.azimuth.target_position = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_DRIVE]) % kEncoderResolution;
-        sys.azimuth.demand_position = EC_READ_S32(m_domain_data + m_offro_dmd_pos[AZIMUTH_DRIVE]) % kEncoderResolution;
-        sys.azimuth.cur_velocity = EC_READ_S32(m_domain_data + m_offro_act_vel[AZIMUTH_DRIVE]);
-        sys.azimuth.target_velocity = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[AZIMUTH_DRIVE]);
-        sys.azimuth.demand_velocity = EC_READ_S32(m_domain_data + m_offro_dmd_vel[AZIMUTH_DRIVE]);
-        sys.azimuth.cur_torque = EC_READ_S16(m_domain_data + m_offro_act_torq[AZIMUTH_DRIVE]);
-        sys.azimuth.statusword = EC_READ_U16(m_domain_data + m_offro_status[AZIMUTH_DRIVE]);
-        const int8_t cur_azimuth_mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[AZIMUTH_DRIVE]);
-        if (cur_azimuth_mode == 1) {
+        sys.azimuth.cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[AZIMUTH_AXIS]) % kPositionMaxValue;
+        sys.azimuth.tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_AXIS]) % kPositionMaxValue;
+        sys.azimuth.dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[AZIMUTH_AXIS]) % kPositionMaxValue;
+        sys.azimuth.cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[AZIMUTH_AXIS]);
+        sys.azimuth.tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[AZIMUTH_AXIS]);
+        sys.azimuth.dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[AZIMUTH_AXIS]);
+        sys.azimuth.cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[AZIMUTH_AXIS]);
+        sys.azimuth.statusword = EC_READ_U16(m_domain_data + m_offro_status[AZIMUTH_AXIS]);
+        sys.azimuth.mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS]);
+        if (sys.azimuth.mode == 1) {
             sys.azimuth.state = AxisState::AXIS_POINT;
-        } else if (cur_azimuth_mode == 3) {
+        } else if (sys.azimuth.mode == 3) {
             sys.azimuth.state = AxisState::AXIS_SCAN;
-        } else {
+        } else if (sys.azimuth.mode == 0) {
             sys.azimuth.state = AxisState::AXIS_IDLE;
+        } else {
+            sys.azimuth.state = AxisState::AXIS_ERROR;
         }
         //! @todo Читать из регистра 0x603F
         sys.azimuth.error_code = 0;
 
         // Читаем данные для угломестного двигателя
-        sys.elevation.cur_position = EC_READ_S32(m_domain_data + m_offro_act_pos[ELEVATION_DRIVE]) % kEncoderResolution;
-        sys.elevation.target_position = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_DRIVE]) % kEncoderResolution;
-        sys.elevation.demand_position = EC_READ_S32(m_domain_data + m_offro_dmd_pos[ELEVATION_DRIVE]) % kEncoderResolution;
-        sys.elevation.cur_velocity = EC_READ_S32(m_domain_data + m_offro_act_vel[ELEVATION_DRIVE]);
-        sys.elevation.target_velocity = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[ELEVATION_DRIVE]);
-        sys.elevation.demand_velocity = EC_READ_S32(m_domain_data + m_offro_dmd_vel[ELEVATION_DRIVE]);
-        sys.elevation.cur_torque = EC_READ_S16(m_domain_data + m_offro_act_torq[ELEVATION_DRIVE]);
-        sys.elevation.statusword = EC_READ_U16(m_domain_data + m_offro_status[ELEVATION_DRIVE]);
-        const int8_t cur_elevaion_mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[ELEVATION_DRIVE]);
-        if (cur_elevaion_mode == 1) {
+        sys.elevation.cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[ELEVATION_AXIS]) % kPositionMaxValue;
+        sys.elevation.tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_AXIS]) % kPositionMaxValue;
+        sys.elevation.dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[ELEVATION_AXIS]) % kPositionMaxValue;
+        sys.elevation.cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[ELEVATION_AXIS]);
+        sys.elevation.tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[ELEVATION_AXIS]);
+        sys.elevation.dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[ELEVATION_AXIS]);
+        sys.elevation.cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[ELEVATION_AXIS]);
+        sys.elevation.statusword = EC_READ_U16(m_domain_data + m_offro_status[ELEVATION_AXIS]);
+        sys.elevation.mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS]);
+        if (sys.elevation.mode == 1) {
             sys.elevation.state = AxisState::AXIS_POINT;
-        } else if (cur_elevaion_mode == 3) {
+        } else if (sys.elevation.mode == 3) {
             sys.elevation.state = AxisState::AXIS_SCAN;
-        } else {
+        } else if (sys.azimuth.mode == 0) {
             sys.elevation.state = AxisState::AXIS_IDLE;
+        } else {
+            sys.azimuth.state = AxisState::AXIS_ERROR;
         }
         //! @todo Читать из регистра 0x603F
         sys.elevation.error_code = 0;
@@ -410,33 +414,26 @@ private:
     }
 
     void prepare_new_commands() {
-        if (m_tx_requested[AZIMUTH_DRIVE].load(std::memory_order_acquire)) {
-            const TXValues txv_azimuth = m_tx_values[AZIMUTH_DRIVE].load(std::memory_order_relaxed);
-            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_DRIVE], txv_azimuth.op_mode);
-            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_DRIVE], txv_azimuth.controlword);
-            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_DRIVE], txv_azimuth.target_pos);
-            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[AZIMUTH_DRIVE], txv_azimuth.target_vel);
+        if (m_tx_requested[AZIMUTH_AXIS].load(std::memory_order_acquire)) {
+            const TXValues txv_azimuth = m_tx_values[AZIMUTH_AXIS].load(std::memory_order_relaxed);
+            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv_azimuth.op_mode);
+            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv_azimuth.controlword);
+            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_AXIS], txv_azimuth.target_pos);
+            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[AZIMUTH_AXIS], txv_azimuth.target_vel);
 
-            m_tx_requested[AZIMUTH_DRIVE].store(false, std::memory_order_relaxed);
+            m_tx_requested[AZIMUTH_AXIS].store(false, std::memory_order_relaxed);
         }
 
-        if (m_tx_requested[ELEVATION_DRIVE].load(std::memory_order_acquire)) {
-            const TXValues txv_azimuth = m_tx_values[ELEVATION_DRIVE].load(std::memory_order_relaxed);
-            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_DRIVE], txv_azimuth.op_mode);
-            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_DRIVE], txv_azimuth.controlword);
-            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_DRIVE], txv_azimuth.target_pos);
-            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[ELEVATION_DRIVE], txv_azimuth.target_vel);
+        if (m_tx_requested[ELEVATION_AXIS].load(std::memory_order_acquire)) {
+            const TXValues txv_azimuth = m_tx_values[ELEVATION_AXIS].load(std::memory_order_relaxed);
+            EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv_azimuth.op_mode);
+            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv_azimuth.controlword);
+            EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_AXIS], txv_azimuth.target_pos);
+            EC_WRITE_U8(m_domain_data + m_offrw_tgt_vel[ELEVATION_AXIS], txv_azimuth.target_vel);
 
-            m_tx_requested[ELEVATION_DRIVE].store(false, std::memory_order_relaxed);
+            m_tx_requested[ELEVATION_AXIS].store(false, std::memory_order_relaxed);
         }
     }
-
-    enum : uint32_t {
-        ELEVATION_DRIVE = 0,
-        AZIMUTH_DRIVE,
-
-        DRIVE_COUNT
-    };
 
     struct TXValues {
         TXValues() noexcept
@@ -460,8 +457,8 @@ private:
     //! Данные для взаимодействия с потоком циклического взаимодействия с сервоусилителями
     std::atomic<bool>               m_stop_flag;    //!< Флаг остановки потока взаимодействия
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
-    std::atomic<TXValues>           m_tx_values[DRIVE_COUNT];
-    std::atomic<bool>               m_tx_requested[DRIVE_COUNT];
+    std::atomic<TXValues>           m_tx_values[AXIS_COUNT];
+    std::atomic<bool>               m_tx_requested[AXIS_COUNT];
 
     //! Структуры для обмена данными по EtherCAT
     ec_master_t*                    m_master = nullptr;
@@ -469,28 +466,28 @@ private:
     ec_domain_t*                    m_domain = nullptr;
     ec_domain_state_t               m_domain_state = {};
     uint8_t*                        m_domain_data = nullptr;
-    ec_slave_config_t*              m_slave_cfg[DRIVE_COUNT];
+    ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
 
     static const uint32_t           kCyclePollingSleepUs;
     static const uint32_t           kRegPerDriveCount;
-    static const uint32_t           kEncoderResolution;
+    static const uint32_t           kPositionMaxValue;
 
-    uint32_t                        m_offrw_ctrl[DRIVE_COUNT];
-    uint32_t                        m_offro_status[DRIVE_COUNT];
-    uint32_t                        m_offrw_tgt_pos[DRIVE_COUNT];
-    uint32_t                        m_offro_dmd_pos[DRIVE_COUNT];
-    uint32_t                        m_offro_act_pos[DRIVE_COUNT];
-    uint32_t                        m_offrw_tgt_vel[DRIVE_COUNT];
-    uint32_t                        m_offro_dmd_vel[DRIVE_COUNT];
-    uint32_t                        m_offro_act_vel[DRIVE_COUNT];
-    uint32_t                        m_offrw_prof_vel[DRIVE_COUNT];
-    uint32_t                        m_offrw_act_mode[DRIVE_COUNT];
-    uint32_t                        m_offro_act_torq[DRIVE_COUNT];
+    uint32_t                        m_offrw_ctrl[AXIS_COUNT];
+    uint32_t                        m_offro_status[AXIS_COUNT];
+    uint32_t                        m_offrw_tgt_pos[AXIS_COUNT];
+    uint32_t                        m_offro_dmd_pos[AXIS_COUNT];
+    uint32_t                        m_offro_act_pos[AXIS_COUNT];
+    uint32_t                        m_offrw_tgt_vel[AXIS_COUNT];
+    uint32_t                        m_offro_dmd_vel[AXIS_COUNT];
+    uint32_t                        m_offro_act_vel[AXIS_COUNT];
+    uint32_t                        m_offrw_prof_vel[AXIS_COUNT];
+    uint32_t                        m_offrw_act_mode[AXIS_COUNT];
+    uint32_t                        m_offro_act_torq[AXIS_COUNT];
  };
 
 const uint32_t Control::Impl::kCyclePollingSleepUs = 500;
 const uint32_t Control::Impl::kRegPerDriveCount = 12;
-const uint32_t Control::Impl::kEncoderResolution = std::pow(2, 20);
+const uint32_t Control::Impl::kPositionMaxValue = std::pow(2, 20);
 
 Control::Control(const char* cfg_file_path)
     : m_pimpl(new Control::Impl(cfg_file_path))
@@ -499,12 +496,12 @@ Control::Control(const char* cfg_file_path)
 Control::~Control() {
 }
 
-void Control::SetModeRun(int32_t azimuth_angle, int32_t azimuth_velocity, int32_t elevation_angle, int32_t elevation_velocity) {
-    m_pimpl->SetModeRun(azimuth_angle, azimuth_velocity, elevation_angle, elevation_velocity);
+void Control::SetModeRun(const Axis& axis, int32_t pos, int32_t vel) {
+    m_pimpl->SetModeRun(axis, pos, vel);
 }
 
-void Control::SetModeIdle(bool azimuth_flag, bool elevation_flag) {
-    m_pimpl->SetModeIdle(azimuth_flag, elevation_flag);
+void Control::SetModeIdle(const Axis& axis) {
+    m_pimpl->SetModeIdle(axis);
 }
 
 const std::atomic<SystemStatus>& Control::GetStatus() const {

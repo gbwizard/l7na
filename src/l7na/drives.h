@@ -39,9 +39,20 @@
 
 namespace Drives {
 
+//! @brief Индекс двигателя
+enum Axis: int32_t {
+    AXIS_NONE = -1,
+
+    AXIS_MIN = 0,
+    ELEVATION_AXIS = 0,
+    AZIMUTH_AXIS,
+
+    AXIS_COUNT
+};
+
 //! @brief Возможные состояния каждого двигателя
-enum class AxisState : int32_t {
-    AXIS_OFF = -1,                   //!< Выключен (до вызова Init или после вызова Release)
+enum AxisState : int32_t {
+    AXIS_OFF = -1,                  //!< Выключен (до вызова Init или после вызова Release)
     AXIS_INIT,                      //!< Инициализируется
     AXIS_IDLE,                      //!< Включен, готов к работе
     AXIS_SCAN,                      //!< Работает в режиме "Сканирование"
@@ -52,30 +63,33 @@ enum class AxisState : int32_t {
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
     AxisStatus() noexcept
-        : target_position(0)
-        , cur_position(0)
-        , demand_position(0)
-        , target_velocity(0)
-        , cur_velocity(0)
-        , demand_velocity(0)
-        , cur_torque(0)
+        : tgt_pos(0)
+        , cur_pos(0)
+        , dmd_pos(0)
+        , tgt_vel(0)
+        , cur_vel(0)
+        , dmd_vel(0)
+        , cur_torq(0)
         , state(AxisState::AXIS_OFF)
         , error_code(0)
+        , statusword(0)
+        , mode(0)
     {}
 
-    int32_t     target_position;        //!< Целевая позиция [импульсы энкодера]
-    int32_t     cur_position;           //!< Текущая позиция [импульсы энкодера]
-    int32_t     demand_position;        //!< Запрашиваемая позиция [импульсы энкодера]
-    int32_t     target_velocity;        //!< Целевая скорость [импульсы энкодера/с]
-    int32_t     cur_velocity;           //!< Текущая скорость [импульсы энкодера/с]
-    int32_t     demand_velocity;        //!< Запрашиваемая скорость [импульсы энкодера/c]
-    int32_t     cur_torque;             //!< Текущий момент [единиц 0,1% от номинального момента двигателя]
+    int32_t     tgt_pos;                //!< Целевая позиция [импульсы энкодера]
+    int32_t     cur_pos;                //!< Текущая позиция [импульсы энкодера]
+    int32_t     dmd_pos;                //!< Запрашиваемая позиция [импульсы энкодера]
+    int32_t     tgt_vel;                //!< Целевая скорость [импульсы энкодера/с]
+    int32_t     cur_vel;                //!< Текущая скорость [импульсы энкодера/с]
+    int32_t     dmd_vel;                //!< Запрашиваемая скорость [импульсы энкодера/c]
+    int32_t     cur_torq;               //!< Текущий момент [единиц 0,1% от _номинального_ момента двигателя]
     AxisState   state;                  //!< Текущее состояние системы управления осью
     uint32_t    error_code;             //!< Код ошибки двигателя по CiA402
-    uint16_t    statusword;             //!< Битовая маска текущего состояния привода
+    uint16_t    statusword;             //!< Битовая маска текущего состояния привода (для отладки)
+    uint8_t     mode;                   //!< Текущий режим работы (для отладки)
 };
 
-enum class SystemState : int32_t {
+enum SystemState : int32_t {
     SYSTEM_OFF = -1,
     SYSTEM_OK = 0,
     SYSTEM_INIT,
@@ -176,22 +190,20 @@ public:
      *  @attention В режиме позиционирования в точку при достижении указанной позиции двигатели фиксируют положение
      *  фиксированным моментом (задаваемым в настройках).
      *
-     *  @param  azimuth_angle       Фиксированный угол по азимуту [импульсы энкодера]
-     *  @param  azimuth_velocity    Скорость по азимуту [импульсы энкодера/с]
-     *  @param  elevation_angle     Фиксированный угол места [импульсы энкодера]
-     *  @param  elevation_angle     Скорость по углу места [импульсы энкодера/с]
+     *  @param  axis                Идентификатор двигателя
+     *  @param  pos                 Фиксированный позиция, в которую перемещается двигатель [импульсы энкодера]
+     *  @param  vel                 Скорость, с которой двигатель вращается в режиме постоянной скорости (это НЕ скорость с которой он перемещается в заданную позицию) [импульсы энкодера/с]
      */
-    void SetModeRun(int32_t azimuth_angle, int32_t azimuth_velocity, int32_t elevation_angle, int32_t elevation_velocity);
+    void SetModeRun(const Axis& axis, int32_t pos, int32_t vel);
 
     /*! @brief Переключает систему управления в режим бездейсвтия.
      *
-     *  @param  azimuth_flag        Флаг перевода в режим бездействия двигателя по азимуту
-     *  @param  elevation_flag      Флаг перевода в режим бездействия двигателя по азимуту
+     *  @param  axis                Идентификатор двигателя
      *
      *  @attention При возникновении ошибки этот вызов также сбрасывает состояние ошибки
      *             и приводит систему в состояние готовности к дальнейшей работе.
      */
-    void SetModeIdle(bool azimuth_flag, bool elevation_flag);
+    void SetModeIdle(const Axis& axis);
 
     /*! @brief Получаем текущее состояние системы управления (динамически изменяемые)
      *
