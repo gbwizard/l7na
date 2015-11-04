@@ -43,8 +43,8 @@ protected:
     Impl(const char* cfg_file_path)
         : m_cfg_path (cfg_file_path)
         , m_sdo_cfg()
-        , m_sys_info{SystemInfo()}
-        , m_sys_status{SystemStatus()}
+        , m_sys_info{}
+        , m_sys_status{}
         , m_stop_flag(false)
         , m_thread()
     {
@@ -199,7 +199,8 @@ protected:
             // Записываем сотояние системы
             SystemStatus s;
             s.state = SystemState::SYSTEM_ERROR;
-            s.error_str = ex.what();
+            // @todo Возвращать строку ошибки
+            // s.error_str = ex.what();
             m_sys_status.store(s);
         }
     }

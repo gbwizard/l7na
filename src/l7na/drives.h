@@ -44,8 +44,8 @@ enum Axis: int32_t {
     AXIS_NONE = -1,
 
     AXIS_MIN = 0,
-    ELEVATION_AXIS = 0,
-    AZIMUTH_AXIS,
+    AZIMUTH_AXIS = 0,
+    ELEVATION_AXIS,
 
     AXIS_COUNT
 };
@@ -102,13 +102,18 @@ struct SystemStatus {
         : azimuth()
         , elevation()
         , state(SystemState::SYSTEM_OFF)
-        , error_str()
+        //, error_str()
     {}
+
+    ~SystemStatus() {
+        int a = 0;
+        a++;
+    }
 
     AxisStatus azimuth;             //!< Статус двигателя по азимуту
     AxisStatus elevation;           //!< Статус двигателя по углу места
     SystemState state;              //!< Состояние системы
-    std::string error_str;          //!< Описание ошибки или пустая строка
+    // std::string error_str;          //!< Описание ошибки или пустая строка
 };
 
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
