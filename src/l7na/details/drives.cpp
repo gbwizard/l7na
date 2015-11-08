@@ -314,7 +314,7 @@ protected:
 
             ++cycles_cur;
             if (cycles_cur % 10000 == 0) {
-                LOG_DEBUG("Cycle count = " << cycles_cur);
+                // LOG_DEBUG("Cycle count = " << cycles_cur);
             }
 
             std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
@@ -392,7 +392,7 @@ private:
 
             for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
                 if (cycles_cmd_start[axis]) {
-                    LOG_DEBUG("Axis command data exchanged in " << cycles_cur - cycles_cmd_start[axis] + 1 << " cycles");
+                    LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles, statusword: " << std::hex << m_sys_status.load().azimuth.statusword);
                     cycles_cmd_start[axis] = 0;
                 }
 
@@ -404,6 +404,9 @@ private:
                         EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                         EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
                         EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.target_pos);
+                        if (txcmd.controlword == 0xF) {
+                            EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 100000);
+                        }
                     } else if (txcmd.op_mode == 3) {
                         EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                         EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
