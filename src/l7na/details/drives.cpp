@@ -332,10 +332,10 @@ private:
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) % kPositionMaxValue;
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]) % kPositionMaxValue;
             sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]) % kPositionMaxValue;
-            sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
-            sys.axes[axis].tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
-            sys.axes[axis].dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
-            sys.axes[axis].cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
+            sys.axes[axis].cur_vel = (-1) * EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
+            sys.axes[axis].tgt_vel = (-1) * EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
+            sys.axes[axis].dmd_vel = (-1) * EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
+            sys.axes[axis].cur_torq = (-1) * EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
             sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
             sys.axes[axis].statusword = EC_READ_U16(m_domain_data + m_offro_status[axis]);
             sys.axes[axis].mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[axis]);
