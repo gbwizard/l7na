@@ -151,6 +151,8 @@ int main(int argc, char* argv[]) {
         } else if (cmd_str == "s") {
             print_status(sys_status.load(std::memory_order_relaxed));
             continue;
+        } else if (cmd_str.empty()) {
+            continue;
         }
 
         Command cmd;
