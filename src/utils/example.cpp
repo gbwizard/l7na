@@ -106,7 +106,7 @@ void print_status(const Drives::SystemStatus& status) {
 }
 
 int main(int argc, char* argv[]) {
-    common::InitLogger(boost::log::trivial::error, "%LineID% %TimeStamp% (%ProcessID%:%ThreadID%) [%Severity%] : <%Channel%> %Message%");
+    common::InitLogger(boost::log::trivial::info, "%LineID% %TimeStamp% (%ProcessID%:%ThreadID%) [%Severity%] : %Message%");
 
     Drives::Control control("");
 

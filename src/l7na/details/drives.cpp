@@ -338,6 +338,9 @@ protected:
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
+            // Получаем статус домена
+            ecrt_domain_state(m_domain, &m_domain_state);
+
             // Обрабатываем пришедшие данные
             process_received_data();
 
@@ -417,6 +420,9 @@ private:
     }
 
     void prepare_new_commands() {
+        static uint64_t counter = 0;
+
+        static uint64_t start_cmd_counter = 0;
         if (m_tx_requested[AZIMUTH_AXIS].load(std::memory_order_acquire)) {
             const TXValues txv = m_tx_values[AZIMUTH_AXIS].load(std::memory_order_relaxed);
             if (txv.op_mode == 0) {
@@ -433,6 +439,15 @@ private:
             }
 
             m_tx_requested[AZIMUTH_AXIS].store(false, std::memory_order_relaxed);
+            start_cmd_counter = counter;
+            LOG_INFO("Az start cmd counter: " << start_cmd_counter << ", domain_wc_state: " << m_domain_state.wc_state);
+        }
+
+        if (start_cmd_counter) {
+            if (m_domain_state.wc_state == EC_WC_COMPLETE) {
+                LOG_INFO("Domain data exchange complete at " << counter - start_cmd_counter + 1);
+                start_cmd_counter = 0;
+            }
         }
 
         if (m_tx_requested[ELEVATION_AXIS].load(std::memory_order_acquire)) {
@@ -452,6 +467,8 @@ private:
 
             m_tx_requested[ELEVATION_AXIS].store(false, std::memory_order_relaxed);
         }
+
+        ++counter;
     }
 
     struct TXValues {
