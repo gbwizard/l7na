@@ -107,6 +107,13 @@ void print_status(const Drives::SystemStatus& status) {
     }
 }
 
+void print_info(const Drives::SystemInfo& info) {
+    for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
+        std::cout << "Axis " << axis << " > dev_name: " << info.axes[axis].dev_name << " encoder_resolution: " << info.axes[axis].encoder_resolution
+                  << " hw_version: " << info.axes[axis].hw_version << " sw_version: " << info.axes[axis].sw_version << std::endl;
+    }
+}
+
 int main(int argc, char* argv[]) {
     blog::trivial::severity_level loglevel;
     fs::path cfg_file_path;
@@ -142,6 +149,7 @@ int main(int argc, char* argv[]) {
 
     std::string cmd_str;
     const std::atomic<Drives::SystemStatus>& sys_status = control.GetStatus();
+    const std::atomic<Drives::SystemInfo>& sys_info = control.GetSystemInfo();
     while (true) {
         std::cout << "> ";
         std::getline(std::cin, cmd_str);
@@ -149,7 +157,10 @@ int main(int argc, char* argv[]) {
         if (cmd_str == "q") {
             break;
         } else if (cmd_str == "s") {
-            print_status(sys_status.load(std::memory_order_relaxed));
+            print_status(sys_status.load(std::memory_order_acquire));
+            continue;
+        } else if (cmd_str == "i") {
+            print_info(sys_info.load(std::memory_order_acquire));
             continue;
         } else if (cmd_str.empty()) {
             continue;

@@ -73,6 +73,7 @@ struct AxisStatus {
         , cur_torq(0)
         , state(AxisState::AXIS_OFF)
         , error_code(0)
+        , cur_temperature(0)
         , ctrlword(0)
         , statusword(0)
         , mode(0)
@@ -87,6 +88,7 @@ struct AxisStatus {
     int32_t     cur_torq;               //!< Текущий момент [единиц 0,1% от _номинального_ момента двигателя]
     AxisState   state;                  //!< Текущее состояние системы управления осью
     uint32_t    error_code;             //!< Код ошибки двигателя по CiA402
+    int32_t     cur_temperature;        //!< Текущая температура для сервоусилителя
     uint16_t    ctrlword;               //!< Битовая маска управления приводом (для отладки)
     uint16_t    statusword;             //!< Битовая маска текущего состояния привода (для отладки)
     uint16_t    mode;                   //!< Текущий режим работы (для отладки)
@@ -114,23 +116,13 @@ struct SystemStatus {
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
 struct AxisInfo {
     AxisInfo() noexcept
-        : encoder_type(4)
-        , cur_temperature(0)
+        : encoder_resolution(0)
         , dev_name()
         , hw_version()
         , sw_version()
     {}
 
-    /*! Тип энкодера.
-     * 0 - unknown
-     * 1 - Serial type encoder (-)
-     * 2 - Serial type Abs encoder (12-bit)
-     * 3 - Serial type Abs encoder (16-bit)
-     * 4 - Serial type Abs encoder (20-bit) <-- сейчас используется этот.
-     * 5 - Serial type Abs encoder (24-bit)
-     */
-    uint16_t        encoder_type;
-    int32_t         cur_temperature;    //!< Текущая температура для сервоусилителя
+    uint16_t        encoder_resolution; //!< Разрешение энкодера
     std::string     dev_name;           //!< Название устройства
     std::string     hw_version;         //!< Версия аппаратного обепечения
     std::string     sw_version;         //!< Версия программного обеспечения
@@ -139,12 +131,9 @@ struct AxisInfo {
 //! @brief Статическая информация для системы
 struct SystemInfo {
     SystemInfo() noexcept
-        : azimuth()
-        , elevation()
     {}
 
-    AxisInfo azimuth;
-    AxisInfo elevation;
+    AxisInfo axes[AXIS_COUNT];
 };
 
 /*! @brief Объект управления системой вращения.

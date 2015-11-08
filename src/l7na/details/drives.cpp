@@ -167,6 +167,13 @@ protected:
 
             LOG_INFO("PDO entries registered in domain");
 
+            // Читаем статическую информацию с подчиненных
+            if (! read_system_info()) {
+                BOOST_THROW_EXCEPTION(Exception("Read non-realtime system info failed"));
+            }
+
+            LOG_INFO("Static system info read");
+
             // "Включаем" мастер-объект
             if (ecrt_master_activate(m_master)) {
                 BOOST_THROW_EXCEPTION(Exception("Master activation failed"));
@@ -324,6 +331,36 @@ protected:
     }
 
 private:
+    bool read_system_info() {
+        SystemInfo sysinfo;
+
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            int result = 0;
+            size_t result_size;
+            uint32_t abort_code;
+            constexpr size_t str_len = 1024;
+            char str[str_len];
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x2002, 0, reinterpret_cast<uint8_t*>(&(sysinfo.axes[axis].encoder_resolution)), sizeof(sysinfo.axes[axis].encoder_resolution), &result_size, &abort_code);
+
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x1008, 0, reinterpret_cast<uint8_t*>(&str[0]), str_len, &result_size, &abort_code);
+            sysinfo.axes[axis].dev_name = std::string(str, result_size);
+
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x1009, 0, reinterpret_cast<uint8_t*>(&str[0]), str_len, &result_size, &abort_code);
+            sysinfo.axes[axis].hw_version = std::string(str, result_size);
+
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x100A, 0, reinterpret_cast<uint8_t*>(&str[0]), str_len, &result_size, &abort_code);
+            sysinfo.axes[axis].sw_version = std::string(str, result_size);
+
+            if (result) {
+                return false;
+            }
+        }
+
+        m_sys_info.store(sysinfo, std::memory_order_relaxed);
+
+        return true;
+    }
+
     SystemStatus process_received_data() {
         SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
