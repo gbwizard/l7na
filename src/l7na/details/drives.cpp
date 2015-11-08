@@ -250,7 +250,7 @@ protected:
         return m_sys_status;
     }
 
-    const std::atomic<SystemInfo>& GetSystemInfo() const {
+    const SystemInfo& GetSystemInfo() const {
         return m_sys_info;
     }
 
@@ -356,7 +356,7 @@ private:
             }
         }
 
-        m_sys_info.store(sysinfo, std::memory_order_relaxed);
+        m_sys_info = sysinfo;
 
         return true;
     }
@@ -472,7 +472,7 @@ private:
 
     fs::path                        m_cfg_path;     //!< Путь к файлу конфигурации
     std::map<uint16_t, int64_t>     m_sdo_cfg;      //!< Конфигурация SDO
-    std::atomic<SystemInfo>         m_sys_info;     //!< Структура с статической информацией о системе
+    SystemInfo                      m_sys_info;     //!< Структура с статической информацией о системе
     std::atomic<SystemStatus>       m_sys_status;   //!< Структура с динамической информацией о системе
 
     //! Данные для взаимодействия с потоком циклического взаимодействия с сервоусилителями
@@ -536,7 +536,7 @@ const std::atomic<SystemStatus>& Control::GetStatus() const {
     return m_pimpl->GetStatus();
 }
 
-const std::atomic<SystemInfo>& Control::GetSystemInfo() const {
+const SystemInfo& Control::GetSystemInfo() const {
     return m_pimpl->GetSystemInfo();
 }
 

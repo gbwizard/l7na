@@ -149,7 +149,7 @@ int main(int argc, char* argv[]) {
 
     std::string cmd_str;
     const std::atomic<Drives::SystemStatus>& sys_status = control.GetStatus();
-    const std::atomic<Drives::SystemInfo>& sys_info = control.GetSystemInfo();
+    const Drives::SystemInfo& sys_info = control.GetSystemInfo();
     while (true) {
         std::cout << "> ";
         std::getline(std::cin, cmd_str);
@@ -160,7 +160,7 @@ int main(int argc, char* argv[]) {
             print_status(sys_status.load(std::memory_order_acquire));
             continue;
         } else if (cmd_str == "i") {
-            print_info(sys_info.load(std::memory_order_acquire));
+            print_info(sys_info);
             continue;
         } else if (cmd_str.empty()) {
             continue;

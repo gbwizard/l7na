@@ -204,7 +204,7 @@ public:
      *
      *  @return Структуру SystemInfo, заполненную актуальными данными.
      */
-    const std::atomic<SystemInfo>& GetSystemInfo() const;
+    const SystemInfo& GetSystemInfo() const;
 
 private:
     class Impl;
