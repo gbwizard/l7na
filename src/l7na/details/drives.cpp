@@ -387,8 +387,7 @@ private:
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
                 } else if (txcmd.op_mode == OP_MODE_POINT) {
-                    const int32_t cur_norm_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) % kPositionMaxValue;
-                    const int32_t tgt_pos = sys.axes[axis].cur_pos - cur_norm_pos + txcmd.tgt_pos;
+                    const int32_t tgt_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) - sys.axes[axis].cur_pos + txcmd.tgt_pos;
 
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
