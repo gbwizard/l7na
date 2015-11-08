@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <atomic>
 #include <memory>
+#include <string>
 
 /*! @brief API системы управления двигателями метеорологической антенны ДМРЛ-3
  *
@@ -160,7 +161,7 @@ public:
      *
      *  @param   cfg_file_path  Путь к файлу с конфигурацией системы (абсолютный или относительно текущей рабочей директории)
      */
-    Control(const char* cfg_file_path);
+    Control(const std::string& cfg_file_path);
 
     /*! @brief Деструктор. Приводит систему управления в первоначальное состояние/выключает систему управления.
      */

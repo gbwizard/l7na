@@ -3,9 +3,15 @@
 #include <chrono>
 
 #include <boost/tokenizer.hpp>
+#include <boost/program_options.hpp>
+#include <boost/filesystem/path.hpp>
 
 #include "l7na/drives.h"
 #include "l7na/details/logger.h"
+
+namespace po = boost::program_options;
+namespace fs = boost::filesystem;
+namespace blog = boost::log;
 
 struct Command {
     Drives::Axis axis = Drives::AZIMUTH_AXIS;
@@ -106,9 +112,35 @@ void print_status(const Drives::SystemStatus& status) {
 }
 
 int main(int argc, char* argv[]) {
-    common::InitLogger(boost::log::trivial::info, "%LineID% %TimeStamp% (%ProcessID%:%ThreadID%) [%Severity%] : %Message%");
+    blog::trivial::severity_level loglevel;
+    fs::path cfg_file_path;
 
-    Drives::Control control("");
+    po::options_description options("options");
+    options.add_options()
+        ("help,h", "display this message")
+        ("loglevel,l", po::value<boost::log::trivial::severity_level>(&loglevel)->default_value(boost::log::trivial::warning), "global loglevel (trace, debug, info, warning, error or fatal)")
+        ("config,c", po::value<fs::path>(&cfg_file_path), "path to config file. If not specified default values for all parameters are used")
+    ;
+
+    po::variables_map vm;
+    try {
+        po::store(po::parse_command_line(argc, argv, options), vm);
+        po::notify(vm);
+    } catch(const po::error& ex) {
+        std::cerr << "Failed to parse command line options: " << ex.what() << std::endl;
+        std::cout << options << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    if (vm.count("help")) {
+        std::cerr << options << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    const char* kLogFormat = "%LineID% %TimeStamp% (%ProcessID%:%ThreadID%) [%Severity%] : %Message%";
+    common::InitLogger(loglevel, kLogFormat);
+
+    Drives::Control control(cfg_file_path.string());
 
     std::cout << "Please, specify your commands here:" << std::endl;
 

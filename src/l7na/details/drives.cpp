@@ -8,6 +8,7 @@
 #include <map>
 
 #include <boost/filesystem/path.hpp>
+#include <boost/lockfree/spsc_queue.hpp>
 
 #include "ecrt.h"
 
@@ -40,7 +41,7 @@ public:
 protected:
     friend class Control;
 
-    Impl(const char* cfg_file_path)
+    Impl(const std::string& cfg_file_path)
         : m_cfg_path (cfg_file_path)
         , m_sdo_cfg()
         , m_sys_info{}
@@ -189,10 +190,6 @@ protected:
             s.azimuth.state = AxisState::AXIS_INIT;
             s.elevation.state = AxisState::AXIS_INIT;
             m_sys_status.store(s);
-
-            for (uint32_t d = AXIS_MIN; d < AXIS_COUNT; ++d) {
-                m_tx_requested[d].store(false, std::memory_order_relaxed);
-            }
         } catch (const std::exception& ex) {
             LOG_ERROR(ex.what());
 
@@ -206,77 +203,40 @@ protected:
     }
 
     void SetModeRun(const Axis& axis, int32_t pos, int32_t vel) {
-        if (axis == AZIMUTH_AXIS) {
-            if (vel) {
-                // profile velocity mode for azimuth drive
+        if (vel) {
+            TXCmd txcmd;
 
-                TXValues tx_values;
-                tx_values.controlword = 0xF;
-                tx_values.op_mode = 3;
-                tx_values.target_vel = vel;
-                tx_values.target_pos = 0;
+            // Переходим в режим "Profile velocity mode" и сразу задаем требуемую скорость
+            txcmd.controlword = 0xF;
+            txcmd.op_mode = 3;
+            txcmd.target_vel = vel;
+            txcmd.target_pos = 0;
+            m_tx_queues[axis].push(txcmd);
+        } else {
+            TXCmd txcmd;
 
-                m_tx_values[AZIMUTH_AXIS].store(tx_values);
-                m_tx_requested[AZIMUTH_AXIS].store(true, std::memory_order_release);
-            } else {
-                // profile positon mode for azimuth drive
+            // Переходим в режим "Profile position mode"
+            txcmd.controlword = 0xF;
+            txcmd.op_mode = 1;
+            txcmd.target_vel = 0;
+            txcmd.target_pos = 0;
+            m_tx_queues[axis].push(txcmd);
 
-                TXValues tx_values;
-                tx_values.controlword = 0xF;
-                tx_values.op_mode = 1;
-                tx_values.target_vel = 0;
-                tx_values.target_pos = pos % kPositionMaxValue;
-
-                m_tx_values[AZIMUTH_AXIS].store(tx_values);
-                m_tx_requested[AZIMUTH_AXIS].store(true, std::memory_order_release);
-            }
-        } else if (axis == ELEVATION_AXIS) {
-            if (vel) {
-                // profile velocity mode for elevation drive
-
-                TXValues tx_values;
-                tx_values.controlword = 0xF;
-                tx_values.op_mode = 3;
-                tx_values.target_vel = vel;
-                tx_values.target_pos = 0;
-
-                m_tx_values[ELEVATION_AXIS].store(tx_values);
-                m_tx_requested[ELEVATION_AXIS].store(true, std::memory_order_release);
-            } else {
-                // profile positon mode for elevation drive
-
-                TXValues tx_values;
-                tx_values.controlword = 0xF;
-                tx_values.op_mode = 1;
-                tx_values.target_vel = 0;
-                tx_values.target_pos = pos % kPositionMaxValue;
-
-                m_tx_values[ELEVATION_AXIS].store(tx_values);
-                m_tx_requested[ELEVATION_AXIS].store(true, std::memory_order_release);
-            }
+            // Задаем следующую точку для позиционирования
+            txcmd.controlword = 0x11F;
+            txcmd.target_pos = pos % kPositionMaxValue;
+            m_tx_queues[axis].push(txcmd);
         }
     }
 
     void SetModeIdle(const Axis& axis) {
-        if (axis == AZIMUTH_AXIS) {
-            TXValues tx_values;
-            tx_values.controlword = 0x6;
-            tx_values.op_mode = 0;
-            tx_values.target_vel = 0;
-            tx_values.target_pos = 0;
+        TXCmd txcmd;
+        txcmd.controlword = 0x6;
+        txcmd.op_mode = 0;
+        txcmd.target_vel = 0;
+        txcmd.target_pos = 0;
 
-            m_tx_values[AZIMUTH_AXIS].store(tx_values);
-            m_tx_requested[AZIMUTH_AXIS].store(true, std::memory_order_release);
-        } else if (axis == ELEVATION_AXIS) {
-            TXValues tx_values;
-            tx_values.controlword = 0x6;
-            tx_values.op_mode = 0;
-            tx_values.target_vel = 0;
-            tx_values.target_pos = 0;
-
-            m_tx_values[ELEVATION_AXIS].store(tx_values);
-            m_tx_requested[ELEVATION_AXIS].store(true, std::memory_order_release);
-        }
+        m_tx_queues[axis].push(txcmd);
     }
 
     const std::atomic<SystemStatus>& GetStatus() const {
@@ -289,14 +249,14 @@ protected:
 
     void CyclicPolling() {
         bool op_state = false;
-        uint64_t cycle_cnt = 0;
+        uint64_t cycles_cur = 0;
 
         while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
-            ++cycle_cnt;
+            ++cycles_cur;
 
             // Получаем статус домена
             ecrt_domain_state(m_domain, &m_domain_state);
@@ -312,10 +272,11 @@ protected:
             });
 
            if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
-              LOG_INFO("Domain is up at " << cycle_cnt << " cycles");
+              LOG_INFO("Domain is up at " << cycles_cur << " cycles");
               op_state = true;
-           } else if (cycle_cnt % 10000 == 0) {
-               LOG_WARN("Domain is NOT up at " << cycle_cnt << " cycles. Domain state=" << m_domain_state.wc_state);
+           } else if (cycles_cur % 10000 == 0) {
+               //! @todo выход из цикла и сообщение об ошибке
+               LOG_WARN("Domain is NOT up at " << cycles_cur << " cycles. Domain state=" << m_domain_state.wc_state);
            }
 
            // Send queued data
@@ -332,7 +293,7 @@ protected:
         s.elevation.state = AxisState::AXIS_IDLE;
         m_sys_status.store(s);
 
-        cycle_cnt = 0;
+        cycles_cur = 0;
         while (! m_stop_flag.load(std::memory_order_consume)) {
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
@@ -351,9 +312,9 @@ protected:
             ecrt_domain_queue(m_domain);
             ecrt_master_send(m_master);
 
-            ++cycle_cnt;
-            if (cycle_cnt % 10000 == 0) {
-                LOG_DEBUG("Cycle count = " << cycle_cnt);
+            ++cycles_cur;
+            if (cycles_cur % 10000 == 0) {
+                LOG_DEBUG("Cycle count = " << cycles_cur);
             }
 
             std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
@@ -365,7 +326,7 @@ protected:
 
 private:
     void process_received_data() {
-        SystemStatus sys;
+        SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
         // Читаем данные для азимутального двигателя
         sys.azimuth.cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[AZIMUTH_AXIS]) % kPositionMaxValue;
@@ -414,65 +375,62 @@ private:
         sys.elevation.error_code = 0;
 
         //! @todo Выставлять исходя из состояний двигателей
-        sys.state = SystemState::SYSTEM_OK;
+        if (sys.state == SystemState::SYSTEM_OK) {
+            sys.state = SystemState::SYSTEM_OK;
+        }
 
         m_sys_status.store(sys, std::memory_order_relaxed);
     }
 
     void prepare_new_commands() {
-        static uint64_t counter = 0;
+        static uint64_t cycles_cur = 0;
+        static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};
+        static uint64_t cycles_domain_incomplete_start = 0;
 
-        static uint64_t start_cmd_counter = 0;
-        if (m_tx_requested[AZIMUTH_AXIS].load(std::memory_order_acquire)) {
-            const TXValues txv = m_tx_values[AZIMUTH_AXIS].load(std::memory_order_relaxed);
-            if (txv.op_mode == 0) {
-                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv.op_mode);
-                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv.controlword);
-            } else if (txv.op_mode == 1) {
-                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv.op_mode);
-                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv.controlword);
-                EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_AXIS], txv.target_pos);
-            } else if (txv.op_mode == 3) {
-                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS], txv.op_mode);
-                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS], txv.controlword);
-                EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[AZIMUTH_AXIS], txv.target_vel);
+        if (m_domain_state.wc_state == EC_WC_COMPLETE) {
+            TXCmd txcmd;
+
+            for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+                if (cycles_cmd_start[axis]) {
+                    LOG_DEBUG("Axis command data exchanged in " << cycles_cur - cycles_cmd_start[axis] + 1 << " cycles");
+                    cycles_cmd_start[axis] = 0;
+                }
+
+                if (m_tx_queues[axis].pop(txcmd)) {
+                    if (txcmd.op_mode == 0) {
+                        EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
+                    } else if (txcmd.op_mode == 1) {
+                        EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
+                        EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.target_pos);
+                    } else if (txcmd.op_mode == 3) {
+                        EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
+                        EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.target_vel);
+                    }
+
+                    cycles_cmd_start[axis] = cycles_cur;
+                }
             }
 
-            m_tx_requested[AZIMUTH_AXIS].store(false, std::memory_order_relaxed);
-            start_cmd_counter = counter;
-            LOG_INFO("Az start cmd counter: " << start_cmd_counter << ", domain_wc_state: " << m_domain_state.wc_state);
-        }
-
-        if (start_cmd_counter) {
-            if (m_domain_state.wc_state == EC_WC_COMPLETE) {
-                LOG_INFO("Domain data exchange complete at " << counter - start_cmd_counter + 1);
-                start_cmd_counter = 0;
+            if (cycles_domain_incomplete_start) {
+                LOG_DEBUG("Domain data exchanged in " << cycles_cur - cycles_domain_incomplete_start + 1 << " cycles");
+                cycles_domain_incomplete_start = 0; // Сбрасываем счетчик начала обмена данными
+            }
+        } else if (! cycles_domain_incomplete_start) {
+            cycles_domain_incomplete_start = cycles_cur;
+        } else if (cycles_domain_incomplete_start) {
+            if (cycles_cur - cycles_domain_incomplete_start + 1 > kMaxDomainDataExchangeCycles) {
+                ; //! @todo Сообщать об ошибке?
             }
         }
 
-        if (m_tx_requested[ELEVATION_AXIS].load(std::memory_order_acquire)) {
-            const TXValues txv = m_tx_values[ELEVATION_AXIS].load(std::memory_order_relaxed);
-            if (txv.op_mode == 0) {
-                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv.op_mode);
-                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv.controlword);
-            } else if (txv.op_mode == 1) {
-                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv.op_mode);
-                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv.controlword);
-                EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_AXIS], txv.target_pos);
-            } else if (txv.op_mode == 3) {
-                EC_WRITE_U8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS], txv.op_mode);
-                EC_WRITE_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS], txv.controlword);
-                EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[ELEVATION_AXIS], txv.target_vel);
-            }
-
-            m_tx_requested[ELEVATION_AXIS].store(false, std::memory_order_relaxed);
-        }
-
-        ++counter;
+        ++cycles_cur;
     }
 
-    struct TXValues {
-        TXValues() noexcept
+    struct TXCmd {
+        TXCmd() noexcept
             : target_pos(0)
             , target_vel(0)
             , controlword(0)
@@ -493,8 +451,10 @@ private:
     //! Данные для взаимодействия с потоком циклического взаимодействия с сервоусилителями
     std::atomic<bool>               m_stop_flag;    //!< Флаг остановки потока взаимодействия
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
-    std::atomic<TXValues>           m_tx_values[AXIS_COUNT];
-    std::atomic<bool>               m_tx_requested[AXIS_COUNT];
+
+    constexpr static uint32_t       kCmdQueueCapacity = 128;
+    typedef boost::lockfree::spsc_queue<TXCmd, boost::lockfree::capacity<kCmdQueueCapacity>> TXCmdQueue;
+    TXCmdQueue                      m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
 
     //! Структуры для обмена данными по EtherCAT
     ec_master_t*                    m_master = nullptr;
@@ -504,9 +464,11 @@ private:
     uint8_t*                        m_domain_data = nullptr;
     ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
 
-    static const uint32_t           kCyclePollingSleepUs;
-    static const uint32_t           kRegPerDriveCount;
-    static const uint32_t           kPositionMaxValue;
+    constexpr static uint32_t       kCyclePollingSleepUs = 800;
+    constexpr static uint32_t       kRegPerDriveCount = 12;
+    constexpr static uint32_t       kPositionMaxValue = std::pow(2, 20);
+    constexpr static uint64_t       kMaxDomainDataExchangeCycles = 8192;
+    constexpr static uint64_t       kMaxDomainInitCycles = 8192;
 
     uint32_t                        m_offrw_ctrl[AXIS_COUNT];
     uint32_t                        m_offro_status[AXIS_COUNT];
@@ -519,13 +481,15 @@ private:
     uint32_t                        m_offrw_prof_vel[AXIS_COUNT];
     uint32_t                        m_offrw_act_mode[AXIS_COUNT];
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
- };
+};
 
-const uint32_t Control::Impl::kCyclePollingSleepUs = 800;
-const uint32_t Control::Impl::kRegPerDriveCount = 12;
-const uint32_t Control::Impl::kPositionMaxValue = std::pow(2, 20);
+constexpr uint32_t Control::Impl::kCyclePollingSleepUs;
+constexpr uint32_t Control::Impl::kRegPerDriveCount;
+constexpr uint32_t Control::Impl::kPositionMaxValue;
+constexpr uint64_t Control::Impl::kMaxDomainDataExchangeCycles;
+constexpr uint64_t Control::Impl::kMaxDomainInitCycles;
 
-Control::Control(const char* cfg_file_path)
+Control::Control(const std::string &cfg_file_path)
     : m_pimpl(new Control::Impl(cfg_file_path))
 {}
 

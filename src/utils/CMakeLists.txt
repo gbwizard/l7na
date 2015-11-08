@@ -6,6 +6,7 @@ target_link_libraries(servoexample
     l7na
     ethercat
     atomic
+    ${Boost_PROGRAM_OPTIONS_LIBRARY}
     ${Boost_LOG_SETUP_LIBRARY}
     ${Boost_LOG_LIBRARY}
     ${Boost_THREAD_LIBRARY}
