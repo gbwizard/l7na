@@ -207,34 +207,34 @@ protected:
             TXCmd txcmd;
 
             // Переходим в режим "Profile velocity mode" и сразу задаем требуемую скорость
-            txcmd.controlword = 0xF;
-            txcmd.op_mode = 3;
-            txcmd.target_vel = vel;
-            txcmd.target_pos = 0;
+            txcmd.ctrlword = 0xF;
+            txcmd.op_mode = OP_MODE_SCAN;
+            txcmd.tgt_vel = vel;
+            txcmd.tgt_pos = 0;
             m_tx_queues[axis].push(txcmd);
         } else {
             TXCmd txcmd;
 
             // Переходим в режим "Profile position mode"
-            txcmd.controlword = 0xF;
-            txcmd.op_mode = 1;
-            txcmd.target_vel = 0;
-            txcmd.target_pos = 0;
+            txcmd.ctrlword = 0xF;
+            txcmd.op_mode = OP_MODE_POINT;
+            txcmd.tgt_vel = 0;
+            txcmd.tgt_pos = 0;
             m_tx_queues[axis].push(txcmd);
 
             // Задаем следующую точку для позиционирования
-            txcmd.controlword = 0x11F;
-            txcmd.target_pos = pos % kPositionMaxValue;
+            txcmd.ctrlword = 0x11F;
+            txcmd.tgt_pos = pos % kPositionMaxValue;
             m_tx_queues[axis].push(txcmd);
         }
     }
 
     void SetModeIdle(const Axis& axis) {
         TXCmd txcmd;
-        txcmd.controlword = 0x6;
-        txcmd.op_mode = 0;
-        txcmd.target_vel = 0;
-        txcmd.target_pos = 0;
+        txcmd.ctrlword = 0x6;
+        txcmd.op_mode = OP_MODE_IDLE;
+        txcmd.tgt_vel = 0;
+        txcmd.tgt_pos = 0;
 
         m_tx_queues[axis].push(txcmd);
     }
@@ -303,20 +303,19 @@ protected:
             ecrt_domain_state(m_domain, &m_domain_state);
 
             // Обрабатываем пришедшие данные
-            process_received_data();
+            const SystemStatus s = process_received_data();
 
             // Если есть новые команды - передаем их подчиненным
-            prepare_new_commands();
+            prepare_new_commands(s);
 
             // Отправляем данные подчиненным
             ecrt_domain_queue(m_domain);
             ecrt_master_send(m_master);
 
             ++cycles_cur;
-            if (cycles_cur % 10000 == 0) {
-                // LOG_DEBUG("Cycle count = " << cycles_cur);
-            }
 
+            // @todo Можно прикрутить condition variable для тогО. чтобы будить поток сразу при поступлении команды,
+            // а не после того, как закончится sleep, но нет понимания, насколько это необходимо сейчас.
             std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
         }
 
@@ -325,7 +324,7 @@ protected:
     }
 
 private:
-    void process_received_data() {
+    SystemStatus process_received_data() {
         SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
@@ -340,11 +339,11 @@ private:
             sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
             sys.axes[axis].statusword = EC_READ_U16(m_domain_data + m_offro_status[axis]);
             sys.axes[axis].mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[axis]);
-            if (sys.axes[axis].mode == 1) {
+            if (sys.axes[axis].mode == OP_MODE_POINT) {
                 sys.axes[axis].state = AxisState::AXIS_POINT;
-            } else if (sys.axes[axis].mode == 3) {
+            } else if (sys.axes[axis].mode == OP_MODE_SCAN) {
                 sys.axes[axis].state = AxisState::AXIS_SCAN;
-            } else if (sys.axes[axis].mode == 0) {
+            } else if (sys.axes[axis].mode == OP_MODE_IDLE) {
                 sys.axes[axis].state = AxisState::AXIS_IDLE;
             } else {
                 sys.axes[axis].state = AxisState::AXIS_ERROR;
@@ -359,17 +358,16 @@ private:
         }
 
         m_sys_status.store(sys, std::memory_order_relaxed);
+
+        return sys;
     }
 
-    void prepare_new_commands() {
+    void prepare_new_commands(const SystemStatus& sys) {
         static uint64_t cycles_cur = 0;
         static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};
 
-        TXCmd txcmd;
-        const SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
-
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-            if (sys.axes[axis].mode == 1) {
+            if (sys.axes[axis].mode == OP_MODE_POINT) {
                 if ((sys.axes[axis].statusword & 0x7) == 0x7) {
                     if (cycles_cmd_start[axis]) {
                         LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
@@ -383,21 +381,25 @@ private:
                 }
             }
 
+            TXCmd txcmd;
             if (m_tx_queues[axis].pop(txcmd)) {
-                if (txcmd.op_mode == 0) {
+                if (txcmd.op_mode == OP_MODE_IDLE) {
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
-                } else if (txcmd.op_mode == 1) {
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
+                } else if (txcmd.op_mode == OP_MODE_POINT) {
+                    const int32_t cur_norm_pos = sys.axes[axis].cur_pos % kPositionMaxValue;
+                    const int32_t tgt_pos = sys.axes[axis].cur_pos - cur_norm_pos + txcmd.tgt_pos;
+
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.target_pos);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], tgt_pos);
                     EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 100000);
 
                     cycles_cmd_start[axis] = cycles_cur;
-                } else if (txcmd.op_mode == 3) {
+                } else if (txcmd.op_mode == OP_MODE_SCAN) {
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.target_vel);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.tgt_vel);
                 }
             }
         }
@@ -405,18 +407,24 @@ private:
         ++cycles_cur;
     }
 
+    enum OperationMode : uint8_t {
+        OP_MODE_IDLE = 0,
+        OP_MODE_POINT = 1,
+        OP_MODE_SCAN = 3
+    };
+
     struct TXCmd {
         TXCmd() noexcept
-            : target_pos(0)
-            , target_vel(0)
-            , controlword(0)
-            , op_mode(0)
+            : tgt_pos(0)
+            , tgt_vel(0)
+            , ctrlword(0)
+            , op_mode(OP_MODE_IDLE)
         {}
 
-        int32_t target_pos;
-        int32_t target_vel;
-        uint16_t controlword;
-        uint8_t op_mode;
+        int32_t tgt_pos;
+        int32_t tgt_vel;
+        uint16_t ctrlword;
+        OperationMode op_mode;
     };
 
     fs::path                        m_cfg_path;     //!< Путь к файлу конфигурации
@@ -459,6 +467,7 @@ private:
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
 };
 
+constexpr uint32_t Control::Impl::kCmdQueueCapacity;
 constexpr uint32_t Control::Impl::kCyclePollingSleepUs;
 constexpr uint32_t Control::Impl::kRegPerDriveCount;
 constexpr uint32_t Control::Impl::kPositionMaxValue;
