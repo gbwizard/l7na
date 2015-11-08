@@ -400,8 +400,8 @@ private:
     }
 
     void prepare_new_commands(const SystemStatus& sys) {
-        static uint64_t cycles_cur = 0;
-        static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};
+        static uint64_t cycles_cur = 0;                         // Номер текущего цикла в рамках работы
+        static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};     // Номер цикла начала ожидания исполнения команды
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             if (sys.axes[axis].mode == OP_MODE_POINT) {

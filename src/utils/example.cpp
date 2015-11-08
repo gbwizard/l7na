@@ -114,6 +114,17 @@ void print_info(const Drives::SystemInfo& info) {
     }
 }
 
+void print_available_commands() {
+    const char kLevelIndent[] = "    ";
+    std::cout << "Available commands:" << std::endl;
+    std::cout << kLevelIndent << "h, help           - print this message" << std::endl;
+    std::cout << kLevelIndent << "q                 - quit" << std::endl;
+    std::cout << kLevelIndent << "s                 - print system status" << std::endl;
+    std::cout << kLevelIndent << "i                 - print system info" << std::endl;
+    std::cout << kLevelIndent << "a|e v <vely>      - set (a)zimuth or (e)levation drive to 'scan' mode with <vel> velocity [pulses/sec]" << std::endl;
+    std::cout << kLevelIndent << "a|e p <pos>       - set (a)zimuth or (e)levation drive to 'point' mode with <pos> position [pulses]" << std::endl;
+}
+
 int main(int argc, char* argv[]) {
     blog::trivial::severity_level loglevel;
     fs::path cfg_file_path;
@@ -156,6 +167,9 @@ int main(int argc, char* argv[]) {
 
         if (cmd_str == "q") {
             break;
+        } else if (cmd_str == "h" || cmd_str == "help") {
+            print_available_commands();
+            continue;
         } else if (cmd_str == "s") {
             print_status(sys_status.load(std::memory_order_acquire));
             continue;
