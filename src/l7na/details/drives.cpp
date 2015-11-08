@@ -401,7 +401,11 @@ private:
                 } else if (txcmd.op_mode == OP_MODE_SCAN) {
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.tgt_vel);
+
+                    // Обращаем значение скорости для обоих приводов, т.к. во внешнем API
+                    // для азимутального двигателя положительная скорость - вращение против часовой стрелки,
+                    // а для угломестного двигателя положительная скорость - подъем антенны.
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], (-1) * txcmd.tgt_vel);
                 }
             }
         }
