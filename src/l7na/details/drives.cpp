@@ -369,16 +369,18 @@ private:
         const SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-            if ((sys.axes[axis].statusword & 0x7) == 0x7) {
-                if (cycles_cmd_start[axis]) {
-                    LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
-                    cycles_cmd_start[axis] = 0;
+            if (sys.axes[axis].mode == 1) {
+                if ((sys.axes[axis].statusword & 0x7) == 0x7) {
+                    if (cycles_cmd_start[axis]) {
+                        LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
+                        cycles_cmd_start[axis] = 0;
+                    }
+                } else if (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles) {
+                    // @todo Сообщить об ошибке
+                    continue;
+                } else {
+                    continue;
                 }
-            } else if (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles) {
-                // @todo Сообщить об ошибке
-                continue;
-            } else {
-                continue;
             }
 
             if (m_tx_queues[axis].pop(txcmd)) {
@@ -390,13 +392,13 @@ private:
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
                     EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.target_pos);
                     EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 100000);
+
+                    cycles_cmd_start[axis] = cycles_cur;
                 } else if (txcmd.op_mode == 3) {
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
                     EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.target_vel);
                 }
-
-                cycles_cmd_start[axis] = cycles_cur;
             }
         }
 
