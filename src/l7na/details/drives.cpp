@@ -387,13 +387,14 @@ private:
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
                 } else if (txcmd.op_mode == OP_MODE_POINT) {
-                    const int32_t notnorm_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
-                    const int32_t norm_pos = sys.axes[axis].cur_pos;
-                    const int32_t tgt_pos = notnorm_pos - norm_pos + txcmd.tgt_pos;
+                    // Вычисляем нормализованные координаты точки позиционирования
+                    const int32_t cur_denorm_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
+                    const int32_t cur_norm_pos = sys.axes[axis].cur_pos;
+                    const int32_t tgt_norm_pos = cur_denorm_pos - cur_norm_pos + txcmd.tgt_pos;
 
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], tgt_pos);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], tgt_norm_pos);
                     EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 100000);
 
                     cycles_cmd_start[axis] = cycles_cur;
