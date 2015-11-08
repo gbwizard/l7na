@@ -187,14 +187,14 @@ protected:
             // Записываем состояние системы
             SystemStatus s;
             s.state = SystemState::SYSTEM_INIT;
-            s.azimuth.state = AxisState::AXIS_INIT;
-            s.elevation.state = AxisState::AXIS_INIT;
+            s.axes[AZIMUTH_AXIS].state = AxisState::AXIS_INIT;
+            s.axes[ELEVATION_AXIS].state = AxisState::AXIS_INIT;
             m_sys_status.store(s);
         } catch (const std::exception& ex) {
             LOG_ERROR(ex.what());
 
             // Записываем сотояние системы
-            SystemStatus s;
+            SystemStatus s = m_sys_status.load(std::memory_order_acquire);
             s.state = SystemState::SYSTEM_ERROR;
             // @todo Возвращать строку ошибки
             // s.error_str = ex.what();
@@ -287,10 +287,10 @@ protected:
         }
 
         // Устанавливаем статус системы в IDLE
-        SystemStatus s;
+        SystemStatus s = m_sys_status.load(std::memory_order_acquire);;
         s.state = SystemState::SYSTEM_OK;
-        s.azimuth.state = AxisState::AXIS_IDLE;
-        s.elevation.state = AxisState::AXIS_IDLE;
+        s.axes[AZIMUTH_AXIS].state = AxisState::AXIS_IDLE;
+        s.axes[ELEVATION_AXIS].state = AxisState::AXIS_IDLE;
         m_sys_status.store(s);
 
         cycles_cur = 0;
@@ -328,51 +328,30 @@ private:
     void process_received_data() {
         SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
-        // Читаем данные для азимутального двигателя
-        sys.azimuth.cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[AZIMUTH_AXIS]) % kPositionMaxValue;
-        sys.azimuth.tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[AZIMUTH_AXIS]) % kPositionMaxValue;
-        sys.azimuth.dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[AZIMUTH_AXIS]) % kPositionMaxValue;
-        sys.azimuth.cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[AZIMUTH_AXIS]);
-        sys.azimuth.tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[AZIMUTH_AXIS]);
-        sys.azimuth.dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[AZIMUTH_AXIS]);
-        sys.azimuth.cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[AZIMUTH_AXIS]);
-        sys.azimuth.ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[AZIMUTH_AXIS]);
-        sys.azimuth.statusword = EC_READ_U16(m_domain_data + m_offro_status[AZIMUTH_AXIS]);
-        sys.azimuth.mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[AZIMUTH_AXIS]);
-        if (sys.azimuth.mode == 1) {
-            sys.azimuth.state = AxisState::AXIS_POINT;
-        } else if (sys.azimuth.mode == 3) {
-            sys.azimuth.state = AxisState::AXIS_SCAN;
-        } else if (sys.azimuth.mode == 0) {
-            sys.azimuth.state = AxisState::AXIS_IDLE;
-        } else {
-            sys.azimuth.state = AxisState::AXIS_ERROR;
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            // Читаем данные для двигателя c индексом axis
+            sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) % kPositionMaxValue;
+            sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]) % kPositionMaxValue;
+            sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]) % kPositionMaxValue;
+            sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
+            sys.axes[axis].tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
+            sys.axes[axis].dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
+            sys.axes[axis].cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
+            sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
+            sys.axes[axis].statusword = EC_READ_U16(m_domain_data + m_offro_status[axis]);
+            sys.axes[axis].mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[axis]);
+            if (sys.axes[axis].mode == 1) {
+                sys.axes[axis].state = AxisState::AXIS_POINT;
+            } else if (sys.axes[axis].mode == 3) {
+                sys.axes[axis].state = AxisState::AXIS_SCAN;
+            } else if (sys.axes[axis].mode == 0) {
+                sys.axes[axis].state = AxisState::AXIS_IDLE;
+            } else {
+                sys.axes[axis].state = AxisState::AXIS_ERROR;
+            }
+            //! @todo Читать из регистра 0x603F
+            sys.axes[axis].error_code = 0;
         }
-        //! @todo Читать из регистра 0x603F
-        sys.azimuth.error_code = 0;
-
-        // Читаем данные для угломестного двигателя
-        sys.elevation.cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[ELEVATION_AXIS]) % kPositionMaxValue;
-        sys.elevation.tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[ELEVATION_AXIS]) % kPositionMaxValue;
-        sys.elevation.dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[ELEVATION_AXIS]) % kPositionMaxValue;
-        sys.elevation.cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[ELEVATION_AXIS]);
-        sys.elevation.tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[ELEVATION_AXIS]);
-        sys.elevation.dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[ELEVATION_AXIS]);
-        sys.elevation.cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[ELEVATION_AXIS]);
-        sys.elevation.ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[ELEVATION_AXIS]);
-        sys.elevation.statusword = EC_READ_U16(m_domain_data + m_offro_status[ELEVATION_AXIS]);
-        sys.elevation.mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[ELEVATION_AXIS]);
-        if (sys.elevation.mode == 1) {
-            sys.elevation.state = AxisState::AXIS_POINT;
-        } else if (sys.elevation.mode == 3) {
-            sys.elevation.state = AxisState::AXIS_SCAN;
-        } else if (sys.elevation.mode == 0) {
-            sys.elevation.state = AxisState::AXIS_IDLE;
-        } else {
-            sys.elevation.state = AxisState::AXIS_ERROR;
-        }
-        //! @todo Читать из регистра 0x603F
-        sys.elevation.error_code = 0;
 
         //! @todo Выставлять исходя из состояний двигателей
         if (sys.state == SystemState::SYSTEM_OK) {
@@ -385,47 +364,39 @@ private:
     void prepare_new_commands() {
         static uint64_t cycles_cur = 0;
         static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};
-        static uint64_t cycles_domain_incomplete_start = 0;
 
-        if (m_domain_state.wc_state == EC_WC_COMPLETE) {
-            TXCmd txcmd;
+        TXCmd txcmd;
+        const SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
-            for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            if ((sys.axes[axis].statusword & 0x7) == 0x7) {
                 if (cycles_cmd_start[axis]) {
-                    LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles, statusword: " << std::hex << m_sys_status.load().azimuth.statusword);
+                    LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
                     cycles_cmd_start[axis] = 0;
                 }
+            } else if (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles) {
+                // @todo Сообщить об ошибке
+                continue;
+            } else {
+                continue;
+            }
 
-                if (m_tx_queues[axis].pop(txcmd)) {
-                    if (txcmd.op_mode == 0) {
-                        EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
-                    } else if (txcmd.op_mode == 1) {
-                        EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
-                        EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.target_pos);
-                        if (txcmd.controlword == 0xF) {
-                            EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 100000);
-                        }
-                    } else if (txcmd.op_mode == 3) {
-                        EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
-                        EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.target_vel);
-                    }
-
-                    cycles_cmd_start[axis] = cycles_cur;
+            if (m_tx_queues[axis].pop(txcmd)) {
+                if (txcmd.op_mode == 0) {
+                    EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
+                } else if (txcmd.op_mode == 1) {
+                    EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.target_pos);
+                    EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 100000);
+                } else if (txcmd.op_mode == 3) {
+                    EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.controlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.target_vel);
                 }
-            }
 
-            if (cycles_domain_incomplete_start) {
-                LOG_DEBUG("Domain data exchanged in " << cycles_cur - cycles_domain_incomplete_start + 1 << " cycles");
-                cycles_domain_incomplete_start = 0; // Сбрасываем счетчик начала обмена данными
-            }
-        } else if (! cycles_domain_incomplete_start) {
-            cycles_domain_incomplete_start = cycles_cur;
-        } else if (cycles_domain_incomplete_start) {
-            if (cycles_cur - cycles_domain_incomplete_start + 1 > kMaxDomainDataExchangeCycles) {
-                ; //! @todo Сообщать об ошибке?
+                cycles_cmd_start[axis] = cycles_cur;
             }
         }
 
@@ -470,7 +441,7 @@ private:
     constexpr static uint32_t       kCyclePollingSleepUs = 800;
     constexpr static uint32_t       kRegPerDriveCount = 12;
     constexpr static uint32_t       kPositionMaxValue = std::pow(2, 20);
-    constexpr static uint64_t       kMaxDomainDataExchangeCycles = 8192;
+    constexpr static uint64_t       kMaxAxisReadyCycles = 8192;
     constexpr static uint64_t       kMaxDomainInitCycles = 8192;
 
     uint32_t                        m_offrw_ctrl[AXIS_COUNT];
@@ -489,7 +460,7 @@ private:
 constexpr uint32_t Control::Impl::kCyclePollingSleepUs;
 constexpr uint32_t Control::Impl::kRegPerDriveCount;
 constexpr uint32_t Control::Impl::kPositionMaxValue;
-constexpr uint64_t Control::Impl::kMaxDomainDataExchangeCycles;
+constexpr uint64_t Control::Impl::kMaxAxisReadyCycles;
 constexpr uint64_t Control::Impl::kMaxDomainInitCycles;
 
 Control::Control(const std::string &cfg_file_path)

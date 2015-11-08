@@ -98,17 +98,13 @@ bool parse_args(const std::string& cmd_str, Command& result) {
 void print_status(const Drives::SystemStatus& status) {
     std::cout << "System > state: " << status.state << std::endl;
 
-    std::cout << "Axis 0 > state: " << status.elevation.state << " statusword: " << std::hex << "0x" << status.elevation.statusword << " ctrlword: 0x" << status.elevation.ctrlword
-              << std::dec << " mode: " << status.elevation.mode
-              << " cur_pos: " << status.elevation.cur_pos << " tgt_pos: " << status.elevation.tgt_pos << " dmd_pos: " << status.elevation.dmd_pos
-              << " cur_vel: " << status.elevation.cur_vel << " tgt_vel: " << status.elevation.tgt_vel << " dmd_vel: " << status.elevation.dmd_vel
-              << " cur_torq: " << status.elevation.cur_torq << std::endl;
-
-    std::cout << "Axis 1 > state: "  << status.azimuth.state << " statusword: " << std::hex << "0x" << status.azimuth.statusword << " ctrlword: 0x" << status.azimuth.ctrlword
-              << std::dec << " mode: " << status.azimuth.mode
-              << " cur_pos: " << status.azimuth.cur_pos << " tgt_pos: " << status.azimuth.tgt_pos << " dmd_pos: " << status.azimuth.dmd_pos
-              << " cur_vel: " << status.azimuth.cur_vel << " tgt_vel: " << status.azimuth.tgt_vel << " dmd_vel: " << status.azimuth.dmd_vel
-              << " cur_torq: " << status.azimuth.cur_torq << std::endl;
+    for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
+        std::cout << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
+                  << std::dec << " mode: " << status.axes[axis].mode
+                  << " cur_pos: " << status.axes[axis].cur_pos << " tgt_pos: " << status.axes[axis].tgt_pos << " dmd_pos: " << status.axes[axis].dmd_pos
+                  << " cur_vel: " << status.axes[axis].cur_vel << " tgt_vel: " << status.axes[axis].tgt_vel << " dmd_vel: " << status.axes[axis].dmd_vel
+                  << " cur_torq: " << status.axes[axis].cur_torq << std::endl;
+    }
 }
 
 int main(int argc, char* argv[]) {

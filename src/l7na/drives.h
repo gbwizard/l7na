@@ -102,14 +102,11 @@ enum SystemState : int32_t {
 //! @brief Текущие значения, возвращаемые системой управления
 struct SystemStatus {
     SystemStatus() noexcept
-        : azimuth()
-        , elevation()
-        , state(SystemState::SYSTEM_OFF)
+        : state(SystemState::SYSTEM_OFF)
         //, error_str()
     {}
 
-    AxisStatus azimuth;             //!< Статус двигателя по азимуту
-    AxisStatus elevation;           //!< Статус двигателя по углу места
+    AxisStatus axes[AXIS_COUNT];    //!< Статус двигателей по осям
     SystemState state;              //!< Состояние системы
     // std::string error_str;          //!< Описание ошибки или пустая строка
 };
