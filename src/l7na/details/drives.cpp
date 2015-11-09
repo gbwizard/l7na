@@ -176,10 +176,16 @@ protected:
 
             // Создаем sdo_requests для доступа к sdo-данным во время realtime-работы
             if (! create_sdo_requests()) {
-                BOOST_THROW_EXCEPTION(Exception("SDO requests creation failed"));
+                BOOST_THROW_EXCEPTION(Exception("Non-realtime data requests creation failed"));
             }
 
-            LOG_INFO("SDO requests created");
+            LOG_INFO("Non-realtime data requests created");
+
+            if (! prerealtime_slave_setup()) {
+                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed"));
+            }
+
+            LOG_INFO("Pre-realtime slave setup done");
 
             // "Включаем" мастер-объект
             if (ecrt_master_activate(m_master)) {
@@ -381,11 +387,25 @@ private:
         return true;
     }
 
+    bool prerealtime_slave_setup() {
+        uint32_t val = 100000;
+        uint32_t abort_code;
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            int result = 0;
+            result |= ecrt_master_sdo_download(m_master, axis, 0x6081, 0, reinterpret_cast<uint8_t*>(&val), sizeof(val), &abort_code);
+            if (result) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     SystemStatus process_received_data(uint64_t cycle_num) {
         SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-            // Читаем данные для двигателя c индексом axis
+            // Читаем данные PDO для двигателя c индексом axis
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) % kPositionMaxValue;
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]) % kPositionMaxValue;
             sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]) % kPositionMaxValue;
