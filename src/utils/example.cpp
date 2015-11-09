@@ -103,7 +103,7 @@ void print_status(const Drives::SystemStatus& status) {
                   << std::dec << " mode: " << status.axes[axis].mode
                   << " cur_pos: " << status.axes[axis].cur_pos << " tgt_pos: " << status.axes[axis].tgt_pos << " dmd_pos: " << status.axes[axis].dmd_pos
                   << " cur_vel: " << status.axes[axis].cur_vel << " tgt_vel: " << status.axes[axis].tgt_vel << " dmd_vel: " << status.axes[axis].dmd_vel
-                  << " cur_torq: " << status.axes[axis].cur_torq << std::endl;
+                  << " cur_torq: " << status.axes[axis].cur_torq << " cur_temp: " << status.axes[axis].cur_temperature << std::endl;
     }
 }
 

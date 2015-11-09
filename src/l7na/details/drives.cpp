@@ -174,6 +174,11 @@ protected:
 
             LOG_INFO("Static system info read");
 
+            // Создаем sdo_requests для доступа к sdo-данным во время realtime-работы
+            if (! create_sdo_requests()) {
+                BOOST_THROW_EXCEPTION(Exception("SDO requests creation failed"));
+            }
+
             // "Включаем" мастер-объект
             if (ecrt_master_activate(m_master)) {
                 BOOST_THROW_EXCEPTION(Exception("Master activation failed"));
@@ -256,14 +261,14 @@ protected:
 
     void CyclicPolling() {
         bool op_state = false;
-        uint64_t cycles_cur = 0;
+        uint64_t cycles_total = 0;
 
         while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
-            ++cycles_cur;
+            ++cycles_total;
 
             // Получаем статус домена
             ecrt_domain_state(m_domain, &m_domain_state);
@@ -279,11 +284,11 @@ protected:
             });
 
            if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
-              LOG_INFO("Domain is up at " << cycles_cur << " cycles");
+              LOG_INFO("Domain is up at " << cycles_total << " cycles");
               op_state = true;
-           } else if (cycles_cur % 10000 == 0) {
+           } else if (cycles_total % 10000 == 0) {
                //! @todo выход из цикла и сообщение об ошибке
-               LOG_WARN("Domain is NOT up at " << cycles_cur << " cycles. Domain state=" << m_domain_state.wc_state);
+               LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state);
            }
 
            // Send queued data
@@ -300,7 +305,7 @@ protected:
         s.axes[ELEVATION_AXIS].state = AxisState::AXIS_IDLE;
         m_sys_status.store(s);
 
-        cycles_cur = 0;
+        cycles_total = 0;
         while (! m_stop_flag.load(std::memory_order_consume)) {
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
@@ -310,7 +315,7 @@ protected:
             ecrt_domain_state(m_domain, &m_domain_state);
 
             // Обрабатываем пришедшие данные
-            const SystemStatus s = process_received_data();
+            const SystemStatus s = process_received_data(cycles_total);
 
             // Если есть новые команды - передаем их подчиненным
             prepare_new_commands(s);
@@ -319,7 +324,7 @@ protected:
             ecrt_domain_queue(m_domain);
             ecrt_master_send(m_master);
 
-            ++cycles_cur;
+            ++cycles_total;
 
             // @todo Можно прикрутить condition variable для тогО. чтобы будить поток сразу при поступлении команды,
             // а не после того, как закончится sleep, но нет понимания, насколько это необходимо сейчас.
@@ -361,7 +366,20 @@ private:
         return true;
     }
 
-    SystemStatus process_received_data() {
+    bool create_sdo_requests() {
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            m_temperature_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2610, 0, 16);
+            if (! m_temperature_sdo[axis]) {
+                return false;
+            }
+            // @todo Вынести в настройки
+            ecrt_sdo_request_timeout(m_temperature_sdo[axis], 10000);
+        }
+
+        return true;
+    }
+
+    SystemStatus process_received_data(uint64_t cycle_num) {
         SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
@@ -387,6 +405,15 @@ private:
             }
             //! @todo Читать из регистра 0x603F
             sys.axes[axis].error_code = 0;
+
+            // Читаем данные sdo
+            if (ecrt_sdo_request_state(m_temperature_sdo[axis]) == EC_REQUEST_SUCCESS) {
+                sys.axes[axis].cur_temperature = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis]));
+                // @todo Вынести в настройки
+                if (cycle_num %= 10000) {
+                    ecrt_sdo_request_read(m_temperature_sdo[axis]);
+                }
+            }
         }
 
         //! @todo Выставлять исходя из состояний двигателей
@@ -490,6 +517,8 @@ private:
     ec_domain_state_t               m_domain_state = {};
     uint8_t*                        m_domain_data = nullptr;
     ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
+
+    ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT];
 
     constexpr static uint32_t       kCyclePollingSleepUs = 800;
     constexpr static uint32_t       kRegPerDriveCount = 12;
