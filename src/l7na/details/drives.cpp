@@ -179,6 +179,8 @@ protected:
                 BOOST_THROW_EXCEPTION(Exception("SDO requests creation failed"));
             }
 
+            LOG_INFO("SDO requests created");
+
             // "Включаем" мастер-объект
             if (ecrt_master_activate(m_master)) {
                 BOOST_THROW_EXCEPTION(Exception("Master activation failed"));
@@ -407,12 +409,15 @@ private:
             sys.axes[axis].error_code = 0;
 
             // Читаем данные sdo
-            if (ecrt_sdo_request_state(m_temperature_sdo[axis]) == EC_REQUEST_SUCCESS) {
+            ec_request_state_t sdo_req_stqte = ecrt_sdo_request_state(m_temperature_sdo[axis]);
+            if (sdo_req_stqte == EC_REQUEST_SUCCESS) {
                 sys.axes[axis].cur_temperature = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis]));
                 // @todo Вынести в настройки
                 if (cycle_num %= 10000) {
                     ecrt_sdo_request_read(m_temperature_sdo[axis]);
                 }
+            } else if (sdo_req_stqte == EC_REQUEST_UNUSED) {
+                ecrt_sdo_request_read(m_temperature_sdo[axis]);
             }
         }
 
