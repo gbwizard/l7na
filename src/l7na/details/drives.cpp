@@ -392,7 +392,8 @@ private:
         uint32_t abort_code;
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             int result = 0;
-            result |= ecrt_master_sdo_download(m_master, axis, 0x6081, 0, reinterpret_cast<uint8_t*>(&val), sizeof(val), &abort_code);
+            result |= ecrt_master_sdo_download(m_master, axis, 0x6083, 0, reinterpret_cast<uint8_t*>(&val), sizeof(val), &abort_code);
+            result |= ecrt_master_sdo_download(m_master, axis, 0x6084, 0, reinterpret_cast<uint8_t*>(&val), sizeof(val), &abort_code);
             if (result) {
                 return false;
             }
