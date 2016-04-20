@@ -1,7 +1,8 @@
 #include <cstdint>
-#include <atomic>
 #include <memory>
 #include <string>
+
+#include <boost/atomic/atomic.hpp>
 
 /*! @brief API системы управления двигателями метеорологической антенны ДМРЛ-3
  *
@@ -45,8 +46,9 @@ enum Axis: int32_t {
     AXIS_NONE = -1,
 
     AXIS_MIN = 0,
-    ELEVATION_AXIS = 0,
-    AZIMUTH_AXIS,
+
+    AZIMUTH_AXIS = 0,
+    ELEVATION_AXIS = 1,
 
     AXIS_COUNT
 };
@@ -63,7 +65,7 @@ enum AxisState : int32_t {
 
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
-    AxisStatus() noexcept
+    AxisStatus()
         : tgt_pos(0)
         , cur_pos(0)
         , dmd_pos(0)
@@ -103,7 +105,7 @@ enum SystemState : int32_t {
 
 //! @brief Текущие значения, возвращаемые системой управления
 struct SystemStatus {
-    SystemStatus() noexcept
+    SystemStatus()
         : state(SystemState::SYSTEM_OFF)
         //, error_str()
     {}
@@ -115,7 +117,7 @@ struct SystemStatus {
 
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
 struct AxisInfo {
-    AxisInfo() noexcept
+    AxisInfo()
         : encoder_resolution(0)
         , dev_name()
         , hw_version()
@@ -130,7 +132,7 @@ struct AxisInfo {
 
 //! @brief Статическая информация для системы
 struct SystemInfo {
-    SystemInfo() noexcept
+    SystemInfo()
     {}
 
     AxisInfo axes[AXIS_COUNT];
@@ -198,7 +200,7 @@ public:
      *
      *  @return Структуру Status, заполненную актуальными данными.
      */
-    const std::atomic<SystemStatus>& GetStatus() const;
+    const boost::atomic<SystemStatus>& GetStatus() const;
 
     /*! @brief Получаем статические параметры системы (не изменяющиеся с течением времени).
      *

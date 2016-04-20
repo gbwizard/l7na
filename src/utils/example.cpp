@@ -1,10 +1,13 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <fstream>
 
 #include <boost/tokenizer.hpp>
 #include <boost/program_options.hpp>
 #include <boost/filesystem/path.hpp>
+#include <boost/memory_order.hpp>
+#include <boost/bind.hpp>
 
 #include "l7na/drives.h"
 #include "l7na/details/logger.h"
@@ -14,10 +17,17 @@ namespace fs = boost::filesystem;
 namespace blog = boost::log;
 
 struct Command {
-    Drives::Axis axis = Drives::AZIMUTH_AXIS;
-    int32_t pos = 0;
-    int32_t vel = 0;
-    bool idle = false;
+    Drives::Axis axis;
+    int32_t pos;
+    int32_t vel;
+    bool idle;
+
+    Command()
+        : axis(Drives::AZIMUTH_AXIS)
+        , pos(0)
+        , vel(0)
+        , idle(false)
+    {}
 
     void clear() {
         axis = Drives::AZIMUTH_AXIS;
@@ -95,15 +105,15 @@ bool parse_args(const std::string& cmd_str, Command& result) {
     return true;
 }
 
-void print_status(const Drives::SystemStatus& status) {
+void print_status(const Drives::SystemStatus& status, std::ostream& os) {
     std::cout << "System > state: " << status.state << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
-        std::cout << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
+        os << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
                   << std::dec << " mode: " << status.axes[axis].mode
-                  << " cur_pos: " << status.axes[axis].cur_pos << " tgt_pos: " << status.axes[axis].tgt_pos << " dmd_pos: " << status.axes[axis].dmd_pos
-                  << " cur_vel: " << status.axes[axis].cur_vel << " tgt_vel: " << status.axes[axis].tgt_vel << " dmd_vel: " << status.axes[axis].dmd_vel
-                  << " cur_torq: " << status.axes[axis].cur_torq << " cur_temp: " << status.axes[axis].cur_temperature << std::endl;
+                  << " cur_pos: " << status.axes[axis].cur_pos  << " tgt_pos: " << status.axes[axis].tgt_pos << " dmd_pos: " << status.axes[axis].dmd_pos
+                  << " cur_vel: " << status.axes[axis].cur_vel  << " tgt_vel: " << status.axes[axis].tgt_vel << " dmd_vel: " << status.axes[axis].dmd_vel
+                  << " cur_trq: " << status.axes[axis].cur_torq << " cur_tmp: " << status.axes[axis].cur_temperature << std::endl;
     }
 }
 
@@ -158,8 +168,32 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Please, specify your commands here:" << std::endl;
 
+    const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatus();
+/*
+    struct StatReader {
+        StatReader(const  boost::atomic<Drives::SystemStatus>& status)
+            : stop_(false)
+            , status_(status)
+        {}
+
+        void Read() {
+            std::ofstream ofs("out.log");
+            while (! stop_) {
+                print_status(status_.load(boost::memory_order_acquire), ofs);
+                ::usleep(200000);
+            }
+            ofs.close();
+        }
+
+        volatile bool stop_;
+        const boost::atomic<Drives::SystemStatus>& status_:
+    };
+
+    StatReader statreader(sys_status);
+    std::thread thread(boost::bind(&statreader, StatReader::Read));
+*/
+
     std::string cmd_str;
-    const std::atomic<Drives::SystemStatus>& sys_status = control.GetStatus();
     const Drives::SystemInfo& sys_info = control.GetSystemInfo();
     while (true) {
         std::cout << "> ";
@@ -171,7 +205,7 @@ int main(int argc, char* argv[]) {
             print_available_commands();
             continue;
         } else if (cmd_str == "s") {
-            print_status(sys_status.load(std::memory_order_acquire));
+            print_status(sys_status.load(boost::memory_order_acquire), std::cerr);
             continue;
         } else if (cmd_str == "i") {
             print_info(sys_info);
@@ -194,6 +228,10 @@ int main(int argc, char* argv[]) {
 
         std::cout << "Command axis: " << cmd.axis << " pos: " << cmd.pos << " vel: " << cmd.vel << " idle: " << cmd.idle << std::endl;
     }
+/*
+    statreader.stop_ = true;
+    thread.join();
+*/
 
-	return 0;
+    return 0;
 }

@@ -4,11 +4,14 @@
 #include <chrono>
 #include <functional>
 #include <algorithm>
-#include <atomic>
 #include <map>
 
 #include <boost/filesystem/path.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
+#include <boost/atomic/atomic.hpp>
+#include <boost/memory_order.hpp>
+#include <boost/thread/thread.hpp>
+#include <boost/chrono/chrono.hpp>
 
 #include "ecrt.h"
 
@@ -26,7 +29,7 @@ class Control::Impl {
 public:
     ~Impl() {
         if (m_thread) {
-            m_stop_flag.store(true, std::memory_order_relaxed);
+            m_stop_flag.store(true, boost::memory_order_relaxed);
             m_thread->join();
             m_thread.reset();
         }
@@ -48,6 +51,9 @@ protected:
         , m_sys_status{}
         , m_stop_flag(false)
         , m_thread()
+        , m_master(NULL)
+        , m_domain(NULL)
+        , m_domain_data(NULL)
     {
         try {
             // Создаем мастер-объект
@@ -214,7 +220,7 @@ protected:
             LOG_ERROR(ex.what());
 
             // Записываем сотояние системы
-            SystemStatus s = m_sys_status.load(std::memory_order_acquire);
+            SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
             s.state = SystemState::SYSTEM_ERROR;
             // @todo Возвращать строку ошибки
             // s.error_str = ex.what();
@@ -259,7 +265,7 @@ protected:
         m_tx_queues[axis].push(txcmd);
     }
 
-    const std::atomic<SystemStatus>& GetStatus() const {
+    const boost::atomic<SystemStatus>& GetStatus() const {
         return m_sys_status;
     }
 
@@ -271,7 +277,7 @@ protected:
         bool op_state = false;
         uint64_t cycles_total = 0;
 
-        while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
+        while (! op_state && ! m_stop_flag.load(boost::memory_order_consume)) {
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
@@ -303,18 +309,18 @@ protected:
            ecrt_domain_queue(m_domain);     // Помечаем данные как готовые к отправке
            ecrt_master_send(m_master);      // Отправляем все датаграммы, помещенные в очередь
 
-           std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
+           boost::this_thread::sleep_for(boost::chrono::microseconds(kCyclePollingSleepUs));
         }
 
         // Устанавливаем статус системы в IDLE
-        SystemStatus s = m_sys_status.load(std::memory_order_acquire);;
+        SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
         s.state = SystemState::SYSTEM_OK;
         s.axes[AZIMUTH_AXIS].state = AxisState::AXIS_IDLE;
         s.axes[ELEVATION_AXIS].state = AxisState::AXIS_IDLE;
         m_sys_status.store(s);
 
         cycles_total = 0;
-        while (! m_stop_flag.load(std::memory_order_consume)) {
+        while (! m_stop_flag.load(boost::memory_order_consume)) {
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
@@ -336,7 +342,7 @@ protected:
 
             // @todo Можно прикрутить condition variable для тогО. чтобы будить поток сразу при поступлении команды,
             // а не после того, как закончится sleep, но нет понимания, насколько это необходимо сейчас.
-            std::this_thread::sleep_for(std::chrono::microseconds(kCyclePollingSleepUs));
+            boost::this_thread::sleep_for(boost::chrono::microseconds(kCyclePollingSleepUs));
         }
 
         ecrt_master_receive(m_master);
@@ -351,17 +357,17 @@ private:
             int result = 0;
             size_t result_size;
             uint32_t abort_code;
-            constexpr size_t str_len = 1024;
-            char str[str_len];
+            const size_t kStrLen = 1024;
+            char str[kStrLen];
             result |= ecrt_master_sdo_upload(m_master, axis, 0x2002, 0, reinterpret_cast<uint8_t*>(&(sysinfo.axes[axis].encoder_resolution)), sizeof(sysinfo.axes[axis].encoder_resolution), &result_size, &abort_code);
 
-            result |= ecrt_master_sdo_upload(m_master, axis, 0x1008, 0, reinterpret_cast<uint8_t*>(&str[0]), str_len, &result_size, &abort_code);
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x1008, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
             sysinfo.axes[axis].dev_name = std::string(str, result_size);
 
-            result |= ecrt_master_sdo_upload(m_master, axis, 0x1009, 0, reinterpret_cast<uint8_t*>(&str[0]), str_len, &result_size, &abort_code);
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x1009, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
             sysinfo.axes[axis].hw_version = std::string(str, result_size);
 
-            result |= ecrt_master_sdo_upload(m_master, axis, 0x100A, 0, reinterpret_cast<uint8_t*>(&str[0]), str_len, &result_size, &abort_code);
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x100A, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
             sysinfo.axes[axis].sw_version = std::string(str, result_size);
 
             if (result) {
@@ -388,7 +394,8 @@ private:
     }
 
     bool prerealtime_slave_setup() {
-        uint32_t val = 100000;
+        //! @todo Remove this when drives are setup from config file
+        uint32_t val = 5000;
         uint32_t abort_code;
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             int result = 0;
@@ -403,7 +410,7 @@ private:
     }
 
     SystemStatus process_received_data(uint64_t cycle_num) {
-        SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
+        SystemStatus sys = m_sys_status.load(boost::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Читаем данные PDO для двигателя c индексом axis
@@ -447,7 +454,7 @@ private:
             sys.state = SystemState::SYSTEM_OK;
         }
 
-        m_sys_status.store(sys, std::memory_order_relaxed);
+        m_sys_status.store(sys, boost::memory_order_relaxed);
 
         return sys;
     }
@@ -510,7 +517,7 @@ private:
     };
 
     struct TXCmd {
-        TXCmd() noexcept
+        TXCmd()
             : tgt_pos(0)
             , tgt_vel(0)
             , ctrlword(0)
@@ -526,31 +533,31 @@ private:
     fs::path                        m_cfg_path;     //!< Путь к файлу конфигурации
     std::map<uint16_t, int64_t>     m_sdo_cfg;      //!< Конфигурация SDO
     SystemInfo                      m_sys_info;     //!< Структура с статической информацией о системе
-    std::atomic<SystemStatus>       m_sys_status;   //!< Структура с динамической информацией о системе
+    boost::atomic<SystemStatus>     m_sys_status;   //!< Структура с динамической информацией о системе
 
     //! Данные для взаимодействия с потоком циклического взаимодействия с сервоусилителями
-    std::atomic<bool>               m_stop_flag;    //!< Флаг остановки потока взаимодействия
+    boost::atomic<bool>             m_stop_flag;    //!< Флаг остановки потока взаимодействия
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
 
-    constexpr static uint32_t       kCmdQueueCapacity = 128;
+    const static uint32_t           kCmdQueueCapacity       = 128;
+    const static uint32_t           kCyclePollingSleepUs    = 800;
+    const static uint32_t           kRegPerDriveCount       = 12;
+    const static uint32_t           kPositionMaxValue       = 1000000000ul;
+    const static uint64_t           kMaxAxisReadyCycles     = 8192;
+    const static uint64_t           kMaxDomainInitCycles    = 8192;
+
     typedef boost::lockfree::spsc_queue<TXCmd, boost::lockfree::capacity<kCmdQueueCapacity>> TXCmdQueue;
     TXCmdQueue                      m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
 
     //! Структуры для обмена данными по EtherCAT
-    ec_master_t*                    m_master = nullptr;
-    ec_master_state_t               m_master_state = {};
-    ec_domain_t*                    m_domain = nullptr;
-    ec_domain_state_t               m_domain_state = {};
-    uint8_t*                        m_domain_data = nullptr;
+    ec_master_t*                    m_master;
+    ec_master_state_t               m_master_state;
+    ec_domain_t*                    m_domain;
+    ec_domain_state_t               m_domain_state;
+    uint8_t*                        m_domain_data;
     ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
 
     ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT];
-
-    constexpr static uint32_t       kCyclePollingSleepUs = 800;
-    constexpr static uint32_t       kRegPerDriveCount = 12;
-    constexpr static uint32_t       kPositionMaxValue = std::pow(2, 20);
-    constexpr static uint64_t       kMaxAxisReadyCycles = 8192;
-    constexpr static uint64_t       kMaxDomainInitCycles = 8192;
 
     uint32_t                        m_offrw_ctrl[AXIS_COUNT];
     uint32_t                        m_offro_status[AXIS_COUNT];
@@ -565,12 +572,12 @@ private:
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
 };
 
-constexpr uint32_t Control::Impl::kCmdQueueCapacity;
-constexpr uint32_t Control::Impl::kCyclePollingSleepUs;
-constexpr uint32_t Control::Impl::kRegPerDriveCount;
-constexpr uint32_t Control::Impl::kPositionMaxValue;
-constexpr uint64_t Control::Impl::kMaxAxisReadyCycles;
-constexpr uint64_t Control::Impl::kMaxDomainInitCycles;
+const uint32_t Control::Impl::kCmdQueueCapacity;
+const uint32_t Control::Impl::kCyclePollingSleepUs;
+const uint32_t Control::Impl::kRegPerDriveCount;
+const uint32_t Control::Impl::kPositionMaxValue;
+const uint64_t Control::Impl::kMaxAxisReadyCycles;
+const uint64_t Control::Impl::kMaxDomainInitCycles;
 
 Control::Control(const std::string &cfg_file_path)
     : m_pimpl(new Control::Impl(cfg_file_path))
@@ -587,7 +594,7 @@ void Control::SetModeIdle(const Axis& axis) {
     m_pimpl->SetModeIdle(axis);
 }
 
-const std::atomic<SystemStatus>& Control::GetStatus() const {
+const boost::atomic<SystemStatus>& Control::GetStatus() const {
     return m_pimpl->GetStatus();
 }
 

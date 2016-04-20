@@ -276,7 +276,7 @@ int main(int argc, char **argv)
 */
 
         timespec tbegin, tend;
-        clock_gettime(CLOCK_MONOTONIC, &tbegin);
+        ::clock_gettime(CLOCK_MONOTONIC, &tbegin);
         printf("Time begin: %lds/%ldns\n", tbegin.tv_sec, tbegin.tv_nsec);
         const uint32_t kIterationMax = 500000;
         uint32_t change_count = 0;
@@ -305,7 +305,7 @@ int main(int argc, char **argv)
 
 // position mode
             if(! target_reached && ((istatus_new >> 10) & 0x1)) {
-                clock_gettime(CLOCK_MONOTONIC, &tend);
+                ::clock_gettime(CLOCK_MONOTONIC, &tend);
                 printf("Target reached. Pos: %d Status: 0x%x TEnd=%lds/%ldns\n", ipos, istatus, tend.tv_sec, tend.tv_nsec);
                 target_reached = true;
                 //break;

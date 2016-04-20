@@ -1,25 +1,9 @@
-cmake_minimum_required(VERSION 2.8.11)
+cmake_minimum_required(VERSION 2.8.2)
 
 project(cpplab)
 
-cmake_policy(SET CMP0022 OLD)       # TODO INTERFACE_LINK_LIBRARIES
-if (POLICY CMP0026)
-    cmake_policy(SET CMP0026 OLD)   # TODO LOCATION target property
-endif()
-if (POLICY CMP0037)
-    cmake_policy(SET CMP0037 OLD)   # TODO naming (add_dependencies + file-dependency)
-endif()
-if (POLICY CMP0046)
-    cmake_policy(SET CMP0046 OLD)   # TODO non-existent dependency in add_dependencies() WTF?! o_O
-endif()
-if (POLICY CMP0053)
-    cmake_policy(SET CMP0053 NEW)   # Only interpret ``if()`` arguments as variables or keywords when unquoted.
-endif()
-if (POLICY CMP0054)
-    cmake_policy(SET CMP0054 OLD)   # TODO Simplify variable reference and escape sequence evaluation (breaks rpms)
-endif()
-
 # Настройка boost
+set(BOOST_ROOT /usr/local)
 set(BOOST_VERSION 1.54.0)
 set(Boost_DEBUG OFF)                                        # Дебаг поиска библиотек Буста
 set(Boost_DETAILED_FAILURE_MSG ON)                          # Детализированый репорт об ошибках
@@ -113,12 +97,12 @@ if (CMAKE_COMPILER_IS_GNUCC)
     string(REGEX REPLACE "\n" "" PROJECT_COMPILER_VERSION ${GCC_CXX_VERSION})
 
     # Для GCC требуем версию компилятора не ниже указаной.
-    set(PROJECT_MIN_GCC_VERSION 4.8)
+    set(PROJECT_MIN_GCC_VERSION 4.4)
     if (PROJECT_COMPILER_VERSION VERSION_LESS ${PROJECT_MIN_GCC_VERSION})
        message(FATAL_ERROR "GCC version ${PROJECT_COMPILER_VERSION} is below ${PROJECT_MIN_GCC_VERSION}.")
     endif()
 
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x")
 endif()
 
 # Выставляем флаги компиляции и линковки в зависимости от типа сборки.
@@ -183,6 +167,7 @@ message(STATUS "Using ranlib: ${CMAKE_RANLIB}")
 message(STATUS "Using strip: ${CMAKE_STRIP}")
 
 find_package(Boost ${BOOST_VERSION} REQUIRED
+    atomic
     chrono
     date_time
     filesystem
