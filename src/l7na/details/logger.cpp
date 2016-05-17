@@ -8,7 +8,7 @@
 #include <boost/log/sources/record_ostream.hpp>
 #include <boost/log/utility/setup/console.hpp>
 
-#include "logger.h"
+#include "l7na/logger.h"
 
 namespace common {
 

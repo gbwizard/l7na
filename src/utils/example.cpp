@@ -10,7 +10,8 @@
 #include <boost/bind.hpp>
 
 #include "l7na/drives.h"
-#include "l7na/details/logger.h"
+#include "l7na/configfile.h"
+#include "l7na/logger.h"
 
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
@@ -137,13 +138,16 @@ void print_available_commands() {
 
 int main(int argc, char* argv[]) {
     blog::trivial::severity_level loglevel;
-    fs::path cfg_file_path;
+    fs::path cfg_file_path, log_file_path;
+    uint32_t log_rate_ms;
 
     po::options_description options("options");
     options.add_options()
         ("help,h", "display this message")
         ("loglevel,l", po::value<boost::log::trivial::severity_level>(&loglevel)->default_value(boost::log::trivial::warning), "global loglevel (trace, debug, info, warning, error or fatal)")
-        ("config,c", po::value<fs::path>(&cfg_file_path), "path to config file. If not specified default values for all parameters are used")
+        ("config,c", po::value<fs::path>(&cfg_file_path)->required()->default_value("servo.conf"), "path to config file")
+        ("logfile,f", po::value<fs::path>(&log_file_path), "path to output log file. If specified engine real time data will be written to this file")
+        ("lograte,r", po::value<uint32_t>(&log_rate_ms), "period in microseconds between samples written to log file. Ignored without 'logfile' option")
     ;
 
     po::variables_map vm;
@@ -164,32 +168,44 @@ int main(int argc, char* argv[]) {
     const char* kLogFormat = "%LineID% %TimeStamp% (%ProcessID%:%ThreadID%) [%Severity%] : %Message%";
     common::InitLogger(loglevel, kLogFormat);
 
-    Drives::Control control(cfg_file_path.string());
+    Config::Storage config;
+    try {
+        config.ReadFile(cfg_file_path.string());
+    } catch(const Config::Exception& ex) {
+        std::cerr << ex.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    Drives::Control control(config);
 
     std::cout << "Please, specify your commands here:" << std::endl;
 
     const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatus();
 /*
     struct StatReader {
-        StatReader(const  boost::atomic<Drives::SystemStatus>& status)
+        StatReader(const  boost::atomic<Drives::SystemStatus>& status, const fs::path& outfilepath, uint32_t lograte_ms)
             : stop_(false)
             , status_(status)
+            , outfilepath_(outfilepath)
+            , lograte_ms_(lograte_ms)
         {}
 
         void Read() {
-            std::ofstream ofs("out.log");
+            std::ofstream ofs(outfilepath_.string());
             while (! stop_) {
                 print_status(status_.load(boost::memory_order_acquire), ofs);
-                ::usleep(200000);
+                ::usleep(lograte_ms_);
             }
             ofs.close();
         }
 
         volatile bool stop_;
         const boost::atomic<Drives::SystemStatus>& status_:
+        const fs::path outfilepath_;
+        const uint32_t lograte_;
     };
 
-    StatReader statreader(sys_status);
+    StatReader statreader(sys_status, log_file_path, log_rate_ms);
     std::thread thread(boost::bind(&statreader, StatReader::Read));
 */
 

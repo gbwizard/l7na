@@ -16,8 +16,8 @@
 #include "ecrt.h"
 
 #include "l7na/drives.h"
-#include "l7na/details/logger.h"
-#include "l7na/details/exceptions.h"
+#include "l7na/logger.h"
+#include "l7na/exceptions.h"
 
 namespace Drives {
 
@@ -44,8 +44,8 @@ public:
 protected:
     friend class Control;
 
-    Impl(const std::string& cfg_file_path)
-        : m_cfg_path (cfg_file_path)
+    Impl(const Config::Storage& config)
+        : m_config(config)
         , m_sdo_cfg()
         , m_sys_info{}
         , m_sys_status{}
@@ -437,14 +437,14 @@ private:
             sys.axes[axis].error_code = 0;
 
             // Читаем данные sdo
-            ec_request_state_t sdo_req_stqte = ecrt_sdo_request_state(m_temperature_sdo[axis]);
-            if (sdo_req_stqte == EC_REQUEST_SUCCESS) {
+            ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis]);
+            if (sdo_req_state == EC_REQUEST_SUCCESS) {
                 sys.axes[axis].cur_temperature = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis]));
                 // @todo Вынести в настройки
                 if (cycle_num %= 10000) {
                     ecrt_sdo_request_read(m_temperature_sdo[axis]);
                 }
-            } else if (sdo_req_stqte == EC_REQUEST_UNUSED) {
+            } else if (sdo_req_state == EC_REQUEST_UNUSED) {
                 ecrt_sdo_request_read(m_temperature_sdo[axis]);
             }
         }
@@ -530,7 +530,7 @@ private:
         OperationMode op_mode;
     };
 
-    fs::path                        m_cfg_path;     //!< Путь к файлу конфигурации
+    Config::Storage                 m_config;       //!< Конфигурация двигателей, задаваемая пользователем
     std::map<uint16_t, int64_t>     m_sdo_cfg;      //!< Конфигурация SDO
     SystemInfo                      m_sys_info;     //!< Структура с статической информацией о системе
     boost::atomic<SystemStatus>     m_sys_status;   //!< Структура с динамической информацией о системе
@@ -579,8 +579,8 @@ const uint32_t Control::Impl::kPositionMaxValue;
 const uint64_t Control::Impl::kMaxAxisReadyCycles;
 const uint64_t Control::Impl::kMaxDomainInitCycles;
 
-Control::Control(const std::string &cfg_file_path)
-    : m_pimpl(new Control::Impl(cfg_file_path))
+Control::Control(const Config::Storage& config)
+    : m_pimpl(new Control::Impl(config))
 {}
 
 Control::~Control() {
