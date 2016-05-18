@@ -78,9 +78,11 @@ protected:
             for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
                 m_slave_cfg[d] = ecrt_master_slave_config(m_master, 0, d, 0x00007595, 0x00000000);
             }
-            const bool all_slave_configs_ok = std::all_of(&m_slave_cfg[0], &m_slave_cfg[AXIS_COUNT], [](const ec_slave_config_t* const sc) -> bool {
-                return sc;
-            });
+
+            bool all_slave_configs_ok = true;
+            for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
+                all_slave_configs_ok |= (m_slave_cfg[d] != NULL);
+            }
 
             if (all_slave_configs_ok) {
                 LOG_INFO("Slave configuration objects (" << AXIS_COUNT << ") created");
@@ -187,9 +189,7 @@ protected:
 
             LOG_INFO("Non-realtime data requests created");
 
-            if (! prerealtime_slave_setup()) {
-                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed"));
-            }
+            prerealtime_slave_setup();
 
             LOG_INFO("Pre-realtime slave setup done");
 
@@ -293,23 +293,24 @@ protected:
                 ecrt_slave_config_state(m_slave_cfg[d], &slave_cfg_state[d]);
             }
 
-            const bool all_slaves_up = std::all_of(&slave_cfg_state[0], &slave_cfg_state[AXIS_COUNT], [](const ec_slave_config_state_t& scs) -> bool {
-                return scs.operational;
-            });
+            bool all_slaves_up = true;
+            for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
+                all_slaves_up |= slave_cfg_state[d].operational;
+            }
 
-           if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
-              LOG_INFO("Domain is up at " << cycles_total << " cycles");
-              op_state = true;
-           } else if (cycles_total % 10000 == 0) {
-               //! @todo выход из цикла и сообщение об ошибке
-               LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state);
-           }
+            if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
+                LOG_INFO("Domain is up at " << cycles_total << " cycles");
+                op_state = true;
+            } else if (cycles_total % 10000 == 0) {
+                //! @todo выход из цикла и сообщение об ошибке
+                LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state);
+            }
 
-           // Send queued data
-           ecrt_domain_queue(m_domain);     // Помечаем данные как готовые к отправке
-           ecrt_master_send(m_master);      // Отправляем все датаграммы, помещенные в очередь
+            // Send queued data
+            ecrt_domain_queue(m_domain);     // Помечаем данные как готовые к отправке
+            ecrt_master_send(m_master);      // Отправляем все датаграммы, помещенные в очередь
 
-           boost::this_thread::sleep_for(boost::chrono::microseconds(kCyclePollingSleepUs));
+            boost::this_thread::sleep_for(boost::chrono::microseconds(kCyclePollingSleepUs));
         }
 
         // Устанавливаем статус системы в IDLE
@@ -393,8 +394,29 @@ private:
         return true;
     }
 
-    bool prerealtime_slave_setup() {
+    void prerealtime_slave_setup() {
+        uint32_t abort_code = 0;
+        const Config::Storage::KeyValueDict& cfg = m_config.GetWholeDict();
+        for (auto pair_it = cfg.begin(); pair_it != cfg.end(); ++pair_it) {
+            const Config::Storage::Key& key_tup = pair_it->first;
+            const Config::Storage::Value& val_tup = pair_it->second;
+
+            const uint16_t axis = boost::get<0>(key_tup);
+            const uint16_t index = boost::get<1>(key_tup);
+            const uint8_t subindex = boost::get<2>(key_tup);
+            int32_t val = boost::get<0>(val_tup);
+            const uint8_t val_size = boost::get<1>(val_tup);
+
+            const int result = ecrt_master_sdo_download(m_master, axis, index, subindex, reinterpret_cast<uint8_t*>(&val), val_size, &abort_code);
+            if (result) {
+                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed. Key=") << axis << ":" << index << ":"
+                                      << static_cast<uint16_t>(subindex) << " = "
+                                      << val << ":" << static_cast<uint16_t>(val_size) << ", abort_code=" << abort_code);
+            }
+        }
+
         //! @todo Remove this when drives are setup from config file
+        /*
         uint32_t val = 5000;
         uint32_t abort_code;
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
@@ -407,6 +429,7 @@ private:
         }
 
         return true;
+        */
     }
 
     SystemStatus process_received_data(uint64_t cycle_num) {

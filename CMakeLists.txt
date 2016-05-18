@@ -77,7 +77,7 @@ macro(AddGccBuildAndLinkFlags value)
     endif()
 endmacro()
 
-AddGccBuildFlags("-fPIC -I. -ggdb3 -fstrict-aliasing -Wall -Wno-unused-local-typedefs -Werror")
+AddGccBuildFlags("-fPIC -I. -ggdb3 -fstrict-aliasing -Wall -Werror")
 AddGccBuildFlags("-Wl,-O1 -rdynamic -Wl,--gc-sections -L${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 
 # Детектируем версию компилятора, проверяем и выставляем флаги компиляции и линковки в соответствии с ней.

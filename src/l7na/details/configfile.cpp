@@ -19,7 +19,7 @@ void Storage::ReadFile(const std::string& filepath) {
     }
 
     const char kKeyValueDelim = '=';
-    const char kKeyDelim = ':';
+    const char kFieldDelim = ':';
     const char kCommentStart = '#';
     std::string cur_line;
     int32_t linenum = 1;
@@ -38,7 +38,7 @@ void Storage::ReadFile(const std::string& filepath) {
         std::string key_str = cur_line.substr(0, kv_delim_pos);
         boost::algorithm::trim(key_str);
         // Find 1st key part
-        const size_t key1_delim_pos = cur_line.find(kKeyDelim);
+        const size_t key1_delim_pos = cur_line.find(kFieldDelim);
         if (key1_delim_pos == std::string::npos) {
             BOOST_THROW_EXCEPTION(Exception("No 1st key delimiter found in line ") << linenum);
             continue;
@@ -46,7 +46,7 @@ void Storage::ReadFile(const std::string& filepath) {
         std::string key1_str = key_str.substr(0, key1_delim_pos);
         boost::algorithm::trim(key1_str);
         // Find 2nd key part
-        const size_t key2_delim_pos = cur_line.find(kKeyDelim, key1_delim_pos + 1);
+        const size_t key2_delim_pos = cur_line.find(kFieldDelim, key1_delim_pos + 1);
         if (key2_delim_pos == std::string::npos) {
             BOOST_THROW_EXCEPTION(Exception("No 2nd key delimiter found in line ") << linenum);
             continue;
@@ -64,18 +64,34 @@ void Storage::ReadFile(const std::string& filepath) {
          */
         std::string val_str = cur_line.substr(kv_delim_pos + 1);
         boost::algorithm::trim(val_str);
+        const size_t val1_delim_pos = val_str.find(kFieldDelim);
+        if (val1_delim_pos == std::string::npos) {
+            BOOST_THROW_EXCEPTION(Exception("No 1st value delimiter found in line ") << linenum);
+            continue;
+        }
+        std::string val1_str = val_str.substr(0, val1_delim_pos);
+        boost::algorithm::trim(val1_str);
+        std::string val2_str = val_str.substr(val1_delim_pos + 1);
+        boost::algorithm::trim(val2_str);
 
         // Result key-value
         Key key;
-        Value val;
         try {
-            const uint8_t key1 = boost::lexical_cast<uint8_t>(key1_str);
-            const uint16_t key2 = boost::lexical_cast<uint8_t>("0x" + key2_str);
+            const uint16_t key1 = boost::lexical_cast<uint16_t>(key1_str);
+            const uint16_t key2 = boost::lexical_cast<uint16_t>("0x" + key2_str);
             const uint8_t key3 = boost::lexical_cast<uint8_t>(key3_str);
             key = boost::make_tuple(key1, key2, key3);
-            val = boost::lexical_cast<Value>(val_str);
         } catch (const boost::bad_lexical_cast&) {
             BOOST_THROW_EXCEPTION(Exception("Invalid key detected in line number ") << linenum);
+        }
+
+        Value val;
+        try {
+            const int64_t val1 = boost::lexical_cast<int64_t>(val1_str);
+            const uint8_t val2 = boost::lexical_cast<uint8_t>(val2_str);
+            val = boost::make_tuple(val1, val2);
+        } catch (const boost::bad_lexical_cast&) {
+            BOOST_THROW_EXCEPTION(Exception("Invalid value detected in line number ") << linenum);
         }
 
         // The last read value with the same key is stored

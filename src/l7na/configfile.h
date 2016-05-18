@@ -21,7 +21,10 @@ DECLARE_EXCEPTION(Exception, common::Exception);
  */
 class Storage {
 public:
-    typedef boost::tuple<uint8_t, uint16_t, uint8_t> Key;
+    // 1st - axis, 2nd - index, 3rd - sub index
+    typedef boost::tuple<uint16_t, uint16_t, uint8_t> Key;
+    // 1st - value, 2nd - value byte size
+    typedef boost::tuple<int64_t, uint8_t> Value;
 
     struct KeyHash
         : public std::unary_function<KeyHash, std::size_t>
@@ -45,7 +48,6 @@ public:
         }
     };
 
-    typedef int64_t Value;
     typedef boost::unordered_map<Key, Value, KeyHash, KeyComp> KeyValueDict;
 
     Storage();
