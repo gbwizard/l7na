@@ -51,7 +51,7 @@ void Storage::ReadFile(const std::string& filepath) {
             BOOST_THROW_EXCEPTION(Exception("No 2nd key delimiter found in line ") << linenum);
             continue;
         }
-        std::string key2_str = key_str.substr(key1_delim_pos + 1, key2_delim_pos - key1_delim_pos);
+        std::string key2_str = key_str.substr(key1_delim_pos + 1, key2_delim_pos - key1_delim_pos - 1);
         boost::algorithm::trim(key2_str);
         // Find 3rd key part
         std::string key3_str = key_str.substr(key2_delim_pos + 1);
@@ -74,15 +74,17 @@ void Storage::ReadFile(const std::string& filepath) {
         std::string val2_str = val_str.substr(val1_delim_pos + 1);
         boost::algorithm::trim(val2_str);
 
+        std::cerr << "Parsed: " << key1_str << " : " << key2_str << " : " <<  key3_str << " = " << val1_str << ":" << val2_str << std::endl;
+
         // Result key-value
         Key key;
         try {
             const uint16_t key1 = boost::lexical_cast<uint16_t>(key1_str);
-            const uint16_t key2 = boost::lexical_cast<uint16_t>("0x" + key2_str);
-            const uint8_t key3 = boost::lexical_cast<uint8_t>(key3_str);
+            const uint16_t key2 = std::strtoul(key2_str.c_str(), NULL, 16);
+            const uint16_t key3 = boost::lexical_cast<uint16_t>(key3_str);
             key = boost::make_tuple(key1, key2, key3);
         } catch (const boost::bad_lexical_cast&) {
-            BOOST_THROW_EXCEPTION(Exception("Invalid key detected in line number ") << linenum);
+            BOOST_THROW_EXCEPTION(Exception("Invalid key detected at line number ") << linenum);
         }
 
         Value val;
@@ -91,7 +93,7 @@ void Storage::ReadFile(const std::string& filepath) {
             const uint8_t val2 = boost::lexical_cast<uint8_t>(val2_str);
             val = boost::make_tuple(val1, val2);
         } catch (const boost::bad_lexical_cast&) {
-            BOOST_THROW_EXCEPTION(Exception("Invalid value detected in line number ") << linenum);
+            BOOST_THROW_EXCEPTION(Exception("Invalid value detected at line number ") << linenum);
         }
 
         // The last read value with the same key is stored

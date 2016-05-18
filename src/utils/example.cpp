@@ -6,10 +6,9 @@
 #include <boost/program_options.hpp>
 #include <boost/filesystem/path.hpp>
 #include <boost/memory_order.hpp>
-#include <boost/bind.hpp>
 #include <boost/thread.hpp>
+#include <boost/bind.hpp>
 #include <boost/chrono.hpp>
-#include <boost/date_time/microsec_time_clock.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/thread/once.hpp>
 
@@ -113,23 +112,27 @@ bool parse_args(const std::string& cmd_str, Command& result) {
 void print_status(const Drives::SystemStatus& status, std::ostream& os) {
     static bool header_printed = false;
     if (! header_printed) {
-        os << "1.DateTime | 2.AxisA";
-        os << "| 3.StateA | 4.StatusWordA | 5.ControlWordA | 6.ModeA | 7.CurPosA | 8.TgtPosA | 9.DmdPosA";
-        os << "| 10.CurVelA | 11.TgtVelA | 12.DmdVelA | 13.CurTrqA | 14.CurTempA";
-        os << "| 15.AxisE";
-        os << "| 16.StateE |17.StatusWordE | 18.ControlWordE | 19.ModeE | 20.CurPosE | 21.TgtPosE | 22.DmdPosE";
-        os << "| 23.CurVelE | 24.TgtVelE | 25.DmdVelE | 26.CurTrqE | 27.CurTempE";
+        os << "INDEX|AxisA";
+        os << "|StateA|StatusWordA|ControlWordA|ModeA|CurPosA|TgtPosA|DmdPosA";
+        os << "|CurVelA|TgtVelA|DmdVelA|CurTrqA|CurTempA";
+        os << "|AxisE";
+        os << "|StateE|StatusWordE|ControlWordE|ModeE|CurPosE|TgtPosE|DmdPosE";
+        os << "|CurVelE|TgtVelE|DmdVelE|CurTrqE|CurTempE";
         os << std::endl;
         header_printed = true;
     }
-    os << boost::posix_time::to_simple_string(boost::posix_time::microsec_clock::local_time());
+    static uint64_t i = 0;
+    os << i;
+    // os << "|" << boost::posix_time::to_simple_string(boost::posix_time::microsec_clock::local_time());
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
-         os << axis << "\t" << status.axes[axis].state << "\t" << std::hex << "0x" << status.axes[axis].statusword << "\t" << status.axes[axis].ctrlword
-                  << std::dec << "\t" << status.axes[axis].mode
-                  << "\t" << status.axes[axis].cur_pos  << "\t" << status.axes[axis].tgt_pos << "\t" << status.axes[axis].dmd_pos
-                  << "\t" << status.axes[axis].cur_vel  << "\t" << status.axes[axis].tgt_vel << "\t" << status.axes[axis].dmd_vel
-                  << "\t" << status.axes[axis].cur_torq << "\t" << status.axes[axis].cur_temperature;
+         os << "|" << axis << "|" << status.axes[axis].state << "|" << std::hex << "0x" << status.axes[axis].statusword << "|" << status.axes[axis].ctrlword
+                  << std::dec << "|" << status.axes[axis].mode
+                  << "|" << status.axes[axis].cur_pos  << "|" << status.axes[axis].tgt_pos << "|" << status.axes[axis].dmd_pos
+                  << "|" << status.axes[axis].cur_vel  << "|" << status.axes[axis].tgt_vel << "|" << status.axes[axis].dmd_vel
+                  << "|" << status.axes[axis].cur_torq << "|" << status.axes[axis].cur_temperature;
     }
+    os << std::endl;
+    ++i;
 }
 
 void print_status_cerr(const Drives::SystemStatus& status) {
@@ -162,6 +165,36 @@ void print_available_commands() {
     std::cerr << kLevelIndent << "a|e p <pos>       - set (a)zimuth or (e)levation drive to 'point' mode with <pos> position [pulses]" << std::endl;
 }
 
+struct StatReader {
+    StatReader(const  boost::atomic<Drives::SystemStatus>& status, const fs::path& outfilepath, uint32_t lograte_us)
+        : stop_(false)
+        , status_(status)
+        , outfilepath_(outfilepath)
+        , lograte_us_(lograte_us)
+    {}
+
+    void CycleRead() {
+        if (outfilepath_.empty()) {
+            return;
+        }
+        std::ofstream ofs(outfilepath_.string());
+        if (! ofs.good()) {
+            std::cerr << "Failed to open log file" << std::endl;
+            return;
+        }
+        while (! stop_) {
+            print_status(status_.load(boost::memory_order_acquire), ofs);
+            boost::this_thread::sleep_for(boost::chrono::microseconds(lograte_us_));
+        }
+        ofs.close();
+    }
+
+    volatile bool stop_;
+    const boost::atomic<Drives::SystemStatus>& status_;
+    const fs::path outfilepath_;
+    const uint32_t lograte_us_;
+};
+
 int main(int argc, char* argv[]) {
     blog::trivial::severity_level loglevel;
     fs::path cfg_file_path, log_file_path;
@@ -171,9 +204,9 @@ int main(int argc, char* argv[]) {
     options.add_options()
         ("help,h", "display this message")
         ("loglevel,l", po::value<boost::log::trivial::severity_level>(&loglevel)->default_value(boost::log::trivial::warning), "global loglevel (trace, debug, info, warning, error or fatal)")
-        ("config,c", po::value<fs::path>(&cfg_file_path)->required()->default_value("servo.conf"), "path to config file")
+        ("config,c", po::value<fs::path>(&cfg_file_path)->required(), "path to config file")
         ("logfile,f", po::value<fs::path>(&log_file_path), "path to output log file. If specified engine real time data will be written to this file")
-        ("lograte,r", po::value<uint32_t>(&log_rate_us), "period in microseconds between samples written to log file. Ignored without 'logfile' option")
+        ("lograte,r", po::value<uint32_t>(&log_rate_us), "period in microseconds (us) between samples written to log file. Ignored without 'logfile' option")
     ;
 
     po::variables_map vm;
@@ -208,38 +241,8 @@ int main(int argc, char* argv[]) {
 
     const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatus();
 
-    struct StatReader {
-        StatReader(const  boost::atomic<Drives::SystemStatus>& status, const fs::path& outfilepath, uint32_t lograte_us)
-            : stop_(false)
-            , status_(status)
-            , outfilepath_(outfilepath)
-            , lograte_us_(lograte_us)
-        {}
-
-        void CycleRead() {
-            if (outfilepath_.empty()) {
-                return;
-            }
-            std::ofstream ofs(outfilepath_.string());
-            if (! ofs.good()) {
-                std::cerr << "Failed to open log file" << std::endl;
-                return;
-            }
-            while (! stop_) {
-                print_status(status_.load(boost::memory_order_acquire), ofs);
-                boost::this_thread::sleep_for(boost::chrono::microseconds(lograte_us_));
-            }
-            ofs.close();
-        }
-
-        volatile bool stop_;
-        const boost::atomic<Drives::SystemStatus>& status_;
-        const fs::path outfilepath_;
-        const uint32_t lograte_us_;
-    };
-
     StatReader statreader(sys_status, log_file_path, log_rate_us);
-    boost::thread statthread(boost::bind(&StatReader::CycleRead, statreader));
+    boost::thread statthread(boost::bind(&StatReader::CycleRead, &statreader));
 
     std::string cmd_str;
     const Drives::SystemInfo& sys_info = control.GetSystemInfo();
