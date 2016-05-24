@@ -1,0 +1,48 @@
+################
+## Azimuth drive
+################
+
+# Encoder type = serial type encoder 20 bit
+0:0x2001:0 = 5:2
+# Encoder resolution
+0:0x2002:0 = 20:2
+# Basic function configuration
+0:0x200D:0 = 17:2
+# Inertia ratio setting
+0:0x2100:0 = 1000:2
+# Positional proportional gain 1 (default = 50)
+0:0x2101:0 = 50:2
+# Positional proportional gain 2 (default = 70)
+0:0x2102:0 = 70:2
+# Speed proportional gain 1 (default = 500)
+0:0x2106:0 = 500:2
+# Speed proportional gain 2 (default = 700)
+0:0x2107:0 = 700:2
+# Speed integral time constant 1 (default = 50)
+0:0x2108:0 = 50:2
+# Speed integral time constant 2 (default = 15)
+0:0x2109:0 = 15:2
+# Velocity window
+0:0x606D:0 = 1000:2
+# Maximum torque
+0:0x6072:0 = 3000:2
+# Profile acceleration
+0:0x6083:0 = 25000:4
+# Profile decleration
+0:0x6084:0 = 25000:4
+
+##################
+## Elevation drive
+##################
+
+# Encoder type = serial type encoder 20 bit
+1:0x2001:0 = 5:2
+# Encoder resolution
+1:0x2002:0 = 20:2
+# Inertia ratio setting
+1:0x2100:0 = 100:2
+# Profile acceleration
+1:0x6083:0 = 5000:4
+# Profile deceleration
+1:0x6084:0 = 5000:4
+
