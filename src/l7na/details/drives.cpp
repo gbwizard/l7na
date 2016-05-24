@@ -250,7 +250,7 @@ protected:
 
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x11F;
-            txcmd.tgt_pos = pos % kPositionMaxValue;
+            txcmd.tgt_pos = pos /*% kPositionMaxValue*/;
             m_tx_queues[axis].push(txcmd);
         }
     }
@@ -363,6 +363,7 @@ private:
             result |= ecrt_master_sdo_upload(m_master, axis, 0x2002, 0, reinterpret_cast<uint8_t*>(&(sysinfo.axes[axis].encoder_resolution)), sizeof(sysinfo.axes[axis].encoder_resolution), &result_size, &abort_code);
 
             result |= ecrt_master_sdo_upload(m_master, axis, 0x1008, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
+            //! @todo result_size == invalid => SIGSEGV
             sysinfo.axes[axis].dev_name = std::string(str, result_size);
 
             result |= ecrt_master_sdo_upload(m_master, axis, 0x1009, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
@@ -437,9 +438,9 @@ private:
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Читаем данные PDO для двигателя c индексом axis
-            sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) % kPositionMaxValue;
-            sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]) % kPositionMaxValue;
-            sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]) % kPositionMaxValue;
+            sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) /*% kPositionMaxValue*/;
+            sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]) /*% kPositionMaxValue*/;
+            sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]) /*% kPositionMaxValue*/;
             sys.axes[axis].cur_vel = (-1) * EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
             sys.axes[axis].tgt_vel = (-1) * EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
             sys.axes[axis].dmd_vel = (-1) * EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
@@ -508,14 +509,16 @@ private:
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
                 } else if (txcmd.op_mode == OP_MODE_POINT) {
                     // Вычисляем нормализованные координаты точки позиционирования
+                    /*
                     const int32_t cur_denorm_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
                     const int32_t cur_norm_pos = sys.axes[axis].cur_pos;
                     const int32_t tgt_norm_pos = cur_denorm_pos - cur_norm_pos + txcmd.tgt_pos;
+                    */
 
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], tgt_norm_pos);
-                    EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 100000);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.tgt_pos);
+                    EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 10000);
 
                     cycles_cmd_start[axis] = cycles_cur;
                 } else if (txcmd.op_mode == OP_MODE_SCAN) {
@@ -565,7 +568,7 @@ private:
     const static uint32_t           kCmdQueueCapacity       = 128;
     const static uint32_t           kCyclePollingSleepUs    = 800;
     const static uint32_t           kRegPerDriveCount       = 12;
-    const static uint32_t           kPositionMaxValue       = 1000000000ul;
+    // const static uint32_t           kPositionMaxValue       = 1000000000ul;
     const static uint64_t           kMaxAxisReadyCycles     = 8192;
     const static uint64_t           kMaxDomainInitCycles    = 8192;
 
@@ -598,7 +601,7 @@ private:
 const uint32_t Control::Impl::kCmdQueueCapacity;
 const uint32_t Control::Impl::kCyclePollingSleepUs;
 const uint32_t Control::Impl::kRegPerDriveCount;
-const uint32_t Control::Impl::kPositionMaxValue;
+// const uint32_t Control::Impl::kPositionMaxValue;
 const uint64_t Control::Impl::kMaxAxisReadyCycles;
 const uint64_t Control::Impl::kMaxDomainInitCycles;
 

@@ -112,7 +112,7 @@ bool parse_args(const std::string& cmd_str, Command& result) {
 void print_status(const Drives::SystemStatus& status, std::ostream& os) {
     static bool header_printed = false;
     if (! header_printed) {
-        os << "INDEX|AxisA";
+        os << "DateTime|AxisA";
         os << "|StateA|StatusWordA|ControlWordA|ModeA|CurPosA|TgtPosA|DmdPosA";
         os << "|CurVelA|TgtVelA|DmdVelA|CurTrqA|CurTempA";
         os << "|AxisE";
@@ -122,8 +122,8 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
         header_printed = true;
     }
     static uint64_t i = 0;
-    os << i;
-    // os << "|" << boost::posix_time::to_simple_string(boost::posix_time::microsec_clock::local_time());
+    // os << i;
+    os << "|" << boost::posix_time::to_simple_string(boost::posix_time::microsec_clock::local_time());
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
          os << "|" << axis << "|" << status.axes[axis].state << "|" << std::hex << "0x" << status.axes[axis].statusword << "|" << status.axes[axis].ctrlword
                   << std::dec << "|" << status.axes[axis].mode
@@ -177,7 +177,7 @@ struct StatReader {
         if (outfilepath_.empty()) {
             return;
         }
-        std::ofstream ofs(outfilepath_.string());
+        std::ofstream ofs(outfilepath_.string(), std::ofstream::out | std::ofstream::app);
         if (! ofs.good()) {
             std::cerr << "Failed to open log file" << std::endl;
             return;
