@@ -114,6 +114,7 @@ struct SystemStatus {
 
     AxisStatus axes[AXIS_COUNT];    //!< Статус двигателей по осям
     SystemState state;              //!< Состояние системы
+    uint32_t time;
     // std::string error_str;          //!< Описание ошибки или пустая строка
 };
 

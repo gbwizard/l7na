@@ -136,7 +136,7 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
 }
 
 void print_status_cerr(const Drives::SystemStatus& status) {
-    std::cerr << "System > state: " << status.state << std::endl;
+    std::cerr << "System > state: " << status.state << " time: " << status.time << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
         std::cerr << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword

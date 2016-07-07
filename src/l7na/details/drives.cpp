@@ -1,3 +1,5 @@
+#include <sys/time.h>
+
 #include <cstdint>
 #include <cmath>
 #include <thread>
@@ -193,6 +195,24 @@ protected:
 
             LOG_INFO("Pre-realtime slave setup done");
 
+            ///////////////////////////////////////////////////////////////////
+            // Настраиваем DC-synchronization
+
+            // Выбираем референсные часы
+            if (int err = ecrt_master_select_reference_clock(m_master, m_slave_cfg[0])) {
+                BOOST_THROW_EXCEPTION(Exception("Failed to select reference clock. Error code: ") << err);
+            }
+
+            // Включаем и настраиваем синхронизацию на подчиненных
+            for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+                ecrt_slave_config_dc(m_slave_cfg[axis], 0x300, 1000000, 125000, 1250000, 125000);
+            }
+
+            // Записываем начальное application time
+            supply_app_time();
+
+            ///////////////////////////////////////////////////////////////////
+
             // "Включаем" мастер-объект
             if (ecrt_master_activate(m_master)) {
                 BOOST_THROW_EXCEPTION(Exception("Master activation failed"));
@@ -244,13 +264,13 @@ protected:
             // Переходим в режим "Profile position mode"
             txcmd.ctrlword = 0xF;
             txcmd.op_mode = OP_MODE_POINT;
-            txcmd.tgt_vel = 0;
             txcmd.tgt_pos = 0;
             m_tx_queues[axis].push(txcmd);
 
             // Задаем следующую точку для позиционирования
-            txcmd.ctrlword = 0x11F;
-            txcmd.tgt_pos = pos /*% kPositionMaxValue*/;
+            txcmd.ctrlword = 0x1F;
+            txcmd.op_mode = OP_MODE_POINT;
+            txcmd.tgt_pos = pos;
             m_tx_queues[axis].push(txcmd);
         }
     }
@@ -282,6 +302,8 @@ protected:
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
+            supply_app_time();
+
             ++cycles_total;
 
             // Получаем статус домена
@@ -301,10 +323,18 @@ protected:
             if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
                 LOG_INFO("Domain is up at " << cycles_total << " cycles");
                 op_state = true;
-            } else if (cycles_total % 10000 == 0) {
+            } else if (cycles_total % 1000 == 0) {
                 //! @todo выход из цикла и сообщение об ошибке
-                LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state);
+                LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state
+                         << ", slave0 state=" << slave_cfg_state[0].al_state
+                         << ", slave1 state=" << slave_cfg_state[1].al_state
+                         );
             }
+
+            // Добавляем команды на синхронизацию времени
+            ecrt_master_sync_reference_clock(m_master);
+            ecrt_master_sync_slave_clocks(m_master);
+            ecrt_master_sync_monitor_queue(m_master);
 
             // Send queued data
             ecrt_domain_queue(m_domain);     // Помечаем данные как готовые к отправке
@@ -326,14 +356,32 @@ protected:
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
+            // Устанавливаем application-time
+            supply_app_time();
+
             // Получаем статус домена
             ecrt_domain_state(m_domain, &m_domain_state);
 
+            // NOT necessary by now
+            /*uint32_t dcsync = ecrt_master_sync_monitor_process(m_master);*/
+
+            // Получаем значение референсных часов
+            uint32_t t = 0;
+            int err = ecrt_master_reference_clock_time(m_master, &t);
+            if (err) {
+                std::cerr << "Failed to get reference clock val" << std::endl;
+            }
+
             // Обрабатываем пришедшие данные
-            const SystemStatus s = process_received_data(cycles_total);
+            const SystemStatus s = process_received_data(cycles_total, t);
 
             // Если есть новые команды - передаем их подчиненным
             prepare_new_commands(s);
+
+            // Добавляем команды на синхронизацию времени
+            ecrt_master_sync_reference_clock(m_master);
+            ecrt_master_sync_slave_clocks(m_master);
+            ecrt_master_sync_monitor_queue(m_master);
 
             // Отправляем данные подчиненным
             ecrt_domain_queue(m_domain);
@@ -356,21 +404,29 @@ private:
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             int result = 0;
-            size_t result_size;
+            size_t result_size = 0;
             uint32_t abort_code;
             const size_t kStrLen = 1024;
             char str[kStrLen];
             result |= ecrt_master_sdo_upload(m_master, axis, 0x2002, 0, reinterpret_cast<uint8_t*>(&(sysinfo.axes[axis].encoder_resolution)), sizeof(sysinfo.axes[axis].encoder_resolution), &result_size, &abort_code);
 
             result |= ecrt_master_sdo_upload(m_master, axis, 0x1008, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
-            //! @todo result_size == invalid => SIGSEGV
-            sysinfo.axes[axis].dev_name = std::string(str, result_size);
+            if (result_size) {
+                sysinfo.axes[axis].dev_name = std::string(str, result_size);
+                result_size = 0;
+            }
 
             result |= ecrt_master_sdo_upload(m_master, axis, 0x1009, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
-            sysinfo.axes[axis].hw_version = std::string(str, result_size);
+            if (result_size) {
+                sysinfo.axes[axis].hw_version = std::string(str, result_size);
+                result_size = 0;
+            }
 
             result |= ecrt_master_sdo_upload(m_master, axis, 0x100A, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
-            sysinfo.axes[axis].sw_version = std::string(str, result_size);
+            if (result_size) {
+                sysinfo.axes[axis].sw_version = std::string(str, result_size);
+                result_size = 0;
+            }
 
             if (result) {
                 return false;
@@ -380,6 +436,16 @@ private:
         m_sys_info = sysinfo;
 
         return true;
+    }
+
+    void supply_app_time() {
+        timeval tv;
+        if (-1 == gettimeofday(&tv, NULL)) {
+            SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+            s.state = SystemState::SYSTEM_ERROR;
+            m_sys_status.store(s);
+        }
+        ecrt_master_application_time(m_master, EC_TIMEVAL2NANO(tv));
     }
 
     bool create_sdo_requests() {
@@ -410,9 +476,9 @@ private:
 
             const int result = ecrt_master_sdo_download(m_master, axis, index, subindex, reinterpret_cast<uint8_t*>(&val), val_size, &abort_code);
             if (result) {
-                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed. Key=") << axis << ":" << index << ":"
-                                      << static_cast<uint16_t>(subindex) << " = "
-                                      << val << ":" << static_cast<uint16_t>(val_size) << ", abort_code=" << abort_code);
+                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed. Key=") << axis << ":" << index << ":" << static_cast<uint16_t>(subindex)
+                                      << " = "
+                                      << val << ":" << val_size << ", abort_code=" << abort_code);
             }
         }
 
@@ -433,7 +499,7 @@ private:
         */
     }
 
-    SystemStatus process_received_data(uint64_t cycle_num) {
+    SystemStatus process_received_data(uint64_t cycle_num, uint32_t time) {
         SystemStatus sys = m_sys_status.load(boost::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
@@ -441,10 +507,10 @@ private:
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) /*% kPositionMaxValue*/;
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]) /*% kPositionMaxValue*/;
             sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]) /*% kPositionMaxValue*/;
-            sys.axes[axis].cur_vel = (-1) * EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
-            sys.axes[axis].tgt_vel = (-1) * EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
-            sys.axes[axis].dmd_vel = (-1) * EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
-            sys.axes[axis].cur_torq = (-1) * EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
+            sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
+            sys.axes[axis].tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
+            sys.axes[axis].dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
+            sys.axes[axis].cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
             sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
             sys.axes[axis].statusword = EC_READ_U16(m_domain_data + m_offro_status[axis]);
             sys.axes[axis].mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[axis]);
@@ -472,6 +538,8 @@ private:
                 ecrt_sdo_request_read(m_temperature_sdo[axis]);
             }
         }
+
+        sys.time = time;
 
         //! @todo Выставлять исходя из состояний двигателей
         if (sys.state == SystemState::SYSTEM_OK) {
@@ -518,17 +586,13 @@ private:
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
                     EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.tgt_pos);
-                    EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 10000);
+                    EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 200000);
 
                     cycles_cmd_start[axis] = cycles_cur;
                 } else if (txcmd.op_mode == OP_MODE_SCAN) {
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
-
-                    // Обращаем значение скорости для обоих приводов, т.к. во внешнем API
-                    // для азимутального двигателя положительная скорость - вращение против часовой стрелки,
-                    // а для угломестного двигателя положительная скорость - подъем антенны.
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], (-1) * txcmd.tgt_vel);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.tgt_vel);
                 }
             }
         }
