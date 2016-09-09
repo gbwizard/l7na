@@ -1,4 +1,5 @@
 #include <sys/time.h>
+#include <errno.h>
 
 #include <cstdint>
 #include <cmath>
@@ -25,7 +26,33 @@ namespace Drives {
 
 namespace fs = boost::filesystem;
 
+typedef boost::chrono::system_clock SysClock;
+
 DECLARE_EXCEPTION(Exception, common::Exception);
+
+struct CycleTimeInfo {
+    SysClock::duration period_ns;
+    SysClock::duration exec_ns;
+    SysClock::duration latency_ns;
+    SysClock::duration latency_min_ns;
+    SysClock::duration latency_max_ns;
+    SysClock::duration period_min_ns;
+    SysClock::duration period_max_ns;
+    SysClock::duration exec_min_ns;
+    SysClock::duration exec_max_ns;
+
+    CycleTimeInfo()
+        : period_ns(SysClock::duration::zero())
+        , exec_ns(SysClock::duration::zero())
+        , latency_ns(SysClock::duration::zero())
+        , latency_min_ns(SysClock::duration::max())
+        , latency_max_ns(SysClock::duration::min())
+        , period_min_ns(SysClock::duration::max())
+        , period_max_ns(SysClock::duration::min())
+        , exec_min_ns(SysClock::duration::max())
+        , exec_max_ns(SysClock::duration::min())
+    {}
+};
 
 class Control::Impl {
 public:
@@ -195,6 +222,11 @@ protected:
 
             LOG_INFO("Pre-realtime slave setup done");
 
+            // Задаем предполагаемый интервал обмена данными
+            if (ecrt_master_set_send_interval(m_master, kCyclePeriodNs / 1000 /* us required here */)) {
+                BOOST_THROW_EXCEPTION(Exception("Failed to setup master send interval"));
+            }
+
             ///////////////////////////////////////////////////////////////////
             // Настраиваем DC-synchronization
 
@@ -205,7 +237,7 @@ protected:
 
             // Включаем и настраиваем синхронизацию на подчиненных
             for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-                ecrt_slave_config_dc(m_slave_cfg[axis], 0x300, 1000000, 125000, 1250000, 125000);
+                ecrt_slave_config_dc(m_slave_cfg[axis], 0x300, kCyclePeriodNs, 125000, 0, 0);
             }
 
             // Записываем начальное application time
@@ -297,12 +329,15 @@ protected:
         bool op_state = false;
         uint64_t cycles_total = 0;
 
+        SysClock::time_point wakeup_time = SysClock::now(), last_start_time = {}, start_time = {}, end_time = {};
+
         while (! op_state && ! m_stop_flag.load(boost::memory_order_consume)) {
+            wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
+            boost::this_thread::sleep_until(wakeup_time);
+
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
-
-            supply_app_time();
 
             ++cycles_total;
 
@@ -323,7 +358,7 @@ protected:
             if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
                 LOG_INFO("Domain is up at " << cycles_total << " cycles");
                 op_state = true;
-            } else if (cycles_total % 1000 == 0) {
+            } else if (cycles_total % 10000 == 0) {
                 //! @todo выход из цикла и сообщение об ошибке
                 LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state
                          << ", slave0 state=" << slave_cfg_state[0].al_state
@@ -332,6 +367,7 @@ protected:
             }
 
             // Добавляем команды на синхронизацию времени
+            supply_app_time();
             ecrt_master_sync_reference_clock(m_master);
             ecrt_master_sync_slave_clocks(m_master);
             ecrt_master_sync_monitor_queue(m_master);
@@ -339,8 +375,6 @@ protected:
             // Send queued data
             ecrt_domain_queue(m_domain);     // Помечаем данные как готовые к отправке
             ecrt_master_send(m_master);      // Отправляем все датаграммы, помещенные в очередь
-
-            boost::this_thread::sleep_for(boost::chrono::microseconds(kCyclePollingSleepUs));
         }
 
         // Устанавливаем статус системы в IDLE
@@ -351,47 +385,84 @@ protected:
         m_sys_status.store(s);
 
         cycles_total = 0;
+
+        CycleTimeInfo cycle_info;
+
         while (! m_stop_flag.load(boost::memory_order_consume)) {
+            wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
+            boost::this_thread::sleep_until(wakeup_time);
+/*
+            // Cycle time info gathering
+            start_time = SysClock::now();
+            cycle_info.latency_ns = start_time - wakeup_time;
+            cycle_info.period_ns = start_time - last_start_time;
+            cycle_info.exec_ns = end_time - last_start_time;
+            last_start_time = start_time;
+
+            if (cycle_info.latency_ns > cycle_info.latency_max_ns) {
+                cycle_info.latency_max_ns = cycle_info.latency_ns;
+            }
+            if (cycle_info.latency_ns < cycle_info.latency_min_ns) {
+                cycle_info.latency_min_ns = cycle_info.latency_ns;
+            }
+            if (cycle_info.period_ns > cycle_info.period_max_ns) {
+                cycle_info.period_max_ns = cycle_info.period_ns;
+            }
+            if (cycle_info.period_ns < cycle_info.period_min_ns) {
+                cycle_info.period_min_ns = cycle_info.period_ns;
+            }
+            if (cycle_info.exec_ns > cycle_info.exec_max_ns) {
+                cycle_info.exec_max_ns = cycle_info.exec_ns;
+            }
+            if (cycle_info.exec_ns < cycle_info.exec_min_ns) {
+                cycle_info.exec_min_ns = cycle_info.exec_ns;
+            }
+*/
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
 
-            // Устанавливаем application-time
-            supply_app_time();
-
             // Получаем статус домена
             ecrt_domain_state(m_domain, &m_domain_state);
 
-            // NOT necessary by now
-            /*uint32_t dcsync = ecrt_master_sync_monitor_process(m_master);*/
+            // Получаем верхнюю оценку синхронизации
+            uint32_t dcsync = ecrt_master_sync_monitor_process(m_master);
 
             // Получаем значение референсных часов
-            uint32_t t = 0;
-            int err = ecrt_master_reference_clock_time(m_master, &t);
-            if (err) {
-                std::cerr << "Failed to get reference clock val" << std::endl;
+            uint32_t lo_ref_time = 0;
+            int err = ecrt_master_reference_clock_time(m_master, &lo_ref_time);
+            if (err == -ENXIO) {
+                SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+                s.state = SystemState::SYSTEM_ERROR;
+                m_sys_status.store(s);
+                // @todo save error code
+            } else if (err == -EIO) {
+                SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+                s.state = SystemState::SYSTEM_ERROR;
+                m_sys_status.store(s);
+                // @todo save error code
             }
 
+            const uint64_t app_time = get_app_time();
+            const uint64_t ref_time = (app_time & 0xFFFFFFFF00000000UL) | lo_ref_time;
+
             // Обрабатываем пришедшие данные
-            const SystemStatus s = process_received_data(cycles_total, t);
+            const SystemStatus s = process_received_data(cycles_total, app_time, ref_time, dcsync, cycle_info);
 
             // Если есть новые команды - передаем их подчиненным
             prepare_new_commands(s);
 
+            // Устанавливаем application-time
+            supply_app_time();
             // Добавляем команды на синхронизацию времени
             ecrt_master_sync_reference_clock(m_master);
             ecrt_master_sync_slave_clocks(m_master);
+            // ВАЖНО: Кладет в очередь отправки запрос на получение от дочерних узлов значение регистра их оффсета от SystemTime.
             ecrt_master_sync_monitor_queue(m_master);
 
             // Отправляем данные подчиненным
             ecrt_domain_queue(m_domain);
             ecrt_master_send(m_master);
-
-            ++cycles_total;
-
-            // @todo Можно прикрутить condition variable для тогО. чтобы будить поток сразу при поступлении команды,
-            // а не после того, как закончится sleep, но нет понимания, насколько это необходимо сейчас.
-            boost::this_thread::sleep_for(boost::chrono::microseconds(kCyclePollingSleepUs));
         }
 
         ecrt_master_receive(m_master);
@@ -438,14 +509,16 @@ private:
         return true;
     }
 
+    uint64_t get_app_time() {
+        const uint64_t since_epoch_ns = boost::chrono::system_clock::now().time_since_epoch().count();
+        const uint64_t since_1_1_2000_ns = since_epoch_ns - 946684800000000000ULL;
+
+        return since_1_1_2000_ns;
+    }
+
     void supply_app_time() {
-        timeval tv;
-        if (-1 == gettimeofday(&tv, NULL)) {
-            SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
-            s.state = SystemState::SYSTEM_ERROR;
-            m_sys_status.store(s);
-        }
-        ecrt_master_application_time(m_master, EC_TIMEVAL2NANO(tv));
+        const uint64_t app_time = get_app_time();
+        ecrt_master_application_time(m_master, app_time);
     }
 
     bool create_sdo_requests() {
@@ -455,7 +528,7 @@ private:
                 return false;
             }
             // @todo Вынести в настройки
-            ecrt_sdo_request_timeout(m_temperature_sdo[axis], 10000);
+            ecrt_sdo_request_timeout(m_temperature_sdo[axis], 10000 /*ms*/);
         }
 
         return true;
@@ -499,7 +572,7 @@ private:
         */
     }
 
-    SystemStatus process_received_data(uint64_t cycle_num, uint32_t time) {
+    SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& cycle_info) {
         SystemStatus sys = m_sys_status.load(boost::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
@@ -539,7 +612,23 @@ private:
             }
         }
 
-        sys.time = time;
+        sys.prev_apptime = sys.apptime;
+        sys.apptime = apptime;
+        sys.reftime = reftime;
+        sys.dcsync = dcsync;
+
+        // @todo Слишком часто
+        /*
+        sys.latency_ns = cycle_info.latency_ns.count();
+        sys.latency_min_ns = cycle_info.latency_min_ns.count();
+        sys.latency_max_ns = cycle_info.latency_max_ns.count();
+        sys.period_ns = cycle_info.period_ns.count();
+        sys.period_min_ns = cycle_info.period_min_ns.count();
+        sys.period_max_ns = cycle_info.period_max_ns.count();
+        sys.exec_ns = cycle_info.exec_ns.count();
+        sys.exec_min_ns = cycle_info.exec_min_ns.count();
+        sys.exec_max_ns = cycle_info.exec_max_ns.count();
+        */
 
         //! @todo Выставлять исходя из состояний двигателей
         if (sys.state == SystemState::SYSTEM_OK) {
@@ -630,9 +719,8 @@ private:
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
 
     const static uint32_t           kCmdQueueCapacity       = 128;
-    const static uint32_t           kCyclePollingSleepUs    = 800;
+    const static uint32_t           kCyclePeriodNs          = 1000000;
     const static uint32_t           kRegPerDriveCount       = 12;
-    // const static uint32_t           kPositionMaxValue       = 1000000000ul;
     const static uint64_t           kMaxAxisReadyCycles     = 8192;
     const static uint64_t           kMaxDomainInitCycles    = 8192;
 
@@ -663,9 +751,8 @@ private:
 };
 
 const uint32_t Control::Impl::kCmdQueueCapacity;
-const uint32_t Control::Impl::kCyclePollingSleepUs;
+const uint32_t Control::Impl::kCyclePeriodNs;
 const uint32_t Control::Impl::kRegPerDriveCount;
-// const uint32_t Control::Impl::kPositionMaxValue;
 const uint64_t Control::Impl::kMaxAxisReadyCycles;
 const uint64_t Control::Impl::kMaxDomainInitCycles;
 

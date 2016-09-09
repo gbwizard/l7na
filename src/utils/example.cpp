@@ -136,7 +136,19 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
 }
 
 void print_status_cerr(const Drives::SystemStatus& status) {
-    std::cerr << "System > state: " << status.state << " time: " << status.time << std::endl;
+    std::cerr << "System > state: " << status.state << " dcsync: " << status.dcsync << std::endl;
+    std::cerr << "    prevapptime               : " << status.prev_apptime << std::hex << " = 0x" << status.prev_apptime << std::dec << std::endl;
+    std::cerr << "    apptime                   : " << status.apptime << std::hex << " = 0x" << status.apptime << std::dec << std::endl;
+    std::cerr << "    reftime                   : " << status.reftime << std::hex << " = 0x" << status.reftime << std::dec << std::endl;
+    std::cerr << "    cycle_latency_ns          : " << status.latency_ns << std::endl;
+    std::cerr << "    cycle_latency_min_ns      : " << status.latency_min_ns << std::endl;
+    std::cerr << "    cycle_latency_max_ns      : " << status.latency_max_ns << std::endl;
+    std::cerr << "    cycle_period_ns           : " << status.period_ns << std::endl;
+    std::cerr << "    cycle_period_min_ns       : " << status.period_min_ns << std::endl;
+    std::cerr << "    cycle_period_max_ns       : " << status.period_max_ns << std::endl;
+    std::cerr << "    cycle_exec_ns             : " << status.exec_ns << std::endl;
+    std::cerr << "    cycle_exec_min_ns         : " << status.exec_min_ns << std::endl;
+    std::cerr << "    cycle_exec_max_ns         : " << status.exec_max_ns << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
         std::cerr << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword

@@ -114,7 +114,20 @@ struct SystemStatus {
 
     AxisStatus axes[AXIS_COUNT];    //!< Статус двигателей по осям
     SystemState state;              //!< Состояние системы
-    uint32_t time;
+    uint64_t prev_apptime;
+    uint64_t apptime;
+    uint64_t reftime;
+    uint32_t dcsync;
+
+    uint32_t latency_ns;
+    uint32_t latency_min_ns;
+    uint32_t latency_max_ns;
+    uint32_t period_ns;
+    uint32_t period_min_ns;
+    uint32_t period_max_ns;
+    uint32_t exec_ns;
+    uint32_t exec_min_ns;
+    uint32_t exec_max_ns;
     // std::string error_str;          //!< Описание ошибки или пустая строка
 };
 

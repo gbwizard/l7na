@@ -1,4 +1,5 @@
 #include <fstream>
+#include <iostream>
 
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
