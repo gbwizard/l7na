@@ -137,24 +137,29 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
 
 void print_status_cerr(const Drives::SystemStatus& status) {
     std::cerr << "System > state: " << status.state << " dcsync: " << status.dcsync << std::endl;
-    std::cerr << "    prevapptime               : " << status.prev_apptime << std::hex << " = 0x" << status.prev_apptime << std::dec << std::endl;
+//    std::cerr << "    prevapptime               : " << status.prev_apptime << std::hex << " = 0x" << status.prev_apptime << std::dec << std::endl;
     std::cerr << "    apptime                   : " << status.apptime << std::hex << " = 0x" << status.apptime << std::dec << std::endl;
     std::cerr << "    reftime                   : " << status.reftime << std::hex << " = 0x" << status.reftime << std::dec << std::endl;
-    std::cerr << "    cycle_latency_ns          : " << status.latency_ns << std::endl;
-    std::cerr << "    cycle_latency_min_ns      : " << status.latency_min_ns << std::endl;
-    std::cerr << "    cycle_latency_max_ns      : " << status.latency_max_ns << std::endl;
-    std::cerr << "    cycle_period_ns           : " << status.period_ns << std::endl;
-    std::cerr << "    cycle_period_min_ns       : " << status.period_min_ns << std::endl;
-    std::cerr << "    cycle_period_max_ns       : " << status.period_max_ns << std::endl;
-    std::cerr << "    cycle_exec_ns             : " << status.exec_ns << std::endl;
-    std::cerr << "    cycle_exec_min_ns         : " << status.exec_min_ns << std::endl;
-    std::cerr << "    cycle_exec_max_ns         : " << status.exec_max_ns << std::endl;
+//    std::cerr << "    cycle_latency_ns          : " << status.latency_ns << std::endl;
+//    std::cerr << "    cycle_latency_min_ns      : " << status.latency_min_ns << std::endl;
+//    std::cerr << "    cycle_latency_max_ns      : " << status.latency_max_ns << std::endl;
+//    std::cerr << "    cycle_period_ns           : " << status.period_ns << std::endl;
+//    std::cerr << "    cycle_period_min_ns       : " << status.period_min_ns << std::endl;
+//    std::cerr << "    cycle_period_max_ns       : " << status.period_max_ns << std::endl;
+//    std::cerr << "    cycle_exec_ns             : " << status.exec_ns << std::endl;
+//    std::cerr << "    cycle_exec_min_ns         : " << status.exec_min_ns << std::endl;
+//    std::cerr << "    cycle_exec_max_ns         : " << status.exec_max_ns << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
         std::cerr << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
                   << std::dec << " mode: " << status.axes[axis].mode
-                  << " cur_pos: " << status.axes[axis].cur_pos  << " tgt_pos: " << status.axes[axis].tgt_pos << " dmd_pos: " << status.axes[axis].dmd_pos
-                  << " cur_vel: " << status.axes[axis].cur_vel  << " tgt_vel: " << status.axes[axis].tgt_vel << " dmd_vel: " << status.axes[axis].dmd_vel
+                  << std::endl << "\t"
+                  << " cur_pos_deg: " << status.axes[axis].cur_pos_deg << " tgt_pos_deg: " << status.axes[axis].tgt_pos_deg << " dmd_pos_deg: " << status.axes[axis].dmd_pos_deg
+                  << " cur_vel_deg: " << status.axes[axis].cur_vel_deg << " tgt_vel_deg: " << status.axes[axis].tgt_vel_deg << " dmd_vel_deg: " << status.axes[axis].dmd_vel_deg
+                  << std::endl << "\t"
+                  << " cur_pos_raw: " << status.axes[axis].cur_pos << " tgt_pos_raw: " << status.axes[axis].tgt_pos << " dmd_pos_raw: " << status.axes[axis].dmd_pos
+                  << " cur_vel_raw: " << status.axes[axis].cur_vel << " tgt_vel_raw: " << status.axes[axis].tgt_vel << " dmd_vel_raw: " << status.axes[axis].dmd_vel
+                  << std::endl << "\t"
                   << " cur_trq: " << status.axes[axis].cur_torq << " cur_tmp: " << status.axes[axis].cur_temperature << std::endl;
     }
 }
@@ -248,6 +253,8 @@ int main(int argc, char* argv[]) {
     }
 
     Drives::Control control(config);
+    control.SetPositionPulseOffset(Drives::AZIMUTH_AXIS, 0);
+    control.SetPositionPulseOffset(Drives::ELEVATION_AXIS, 85000);
 
     std::cerr << "Please, specify your commands here:" << std::endl;
 

@@ -54,6 +54,39 @@ struct CycleTimeInfo {
     {}
 };
 
+AxisStatus::AxisStatus()
+    : tgt_pos_deg(0.0)
+    , cur_pos_deg(0.0)
+    , dmd_pos_deg(0.0)
+    , tgt_vel_deg(0.0)
+    , cur_vel_deg(0.0)
+    , dmd_vel_deg(0.0)
+    , tgt_pos(0)
+    , cur_pos(0)
+    , dmd_pos(0)
+    , tgt_vel(0)
+    , cur_vel(0)
+    , dmd_vel(0)
+    , cur_torq(0)
+    , state(AxisState::AXIS_OFF)
+    , error_code(0)
+    , cur_temperature(0)
+    , ctrlword(0)
+    , statusword(0)
+    , mode(0)
+{}
+
+bool AxisStatus::IsReady() const {
+    return state == AxisState::AXIS_IDLE || state == AxisState::AXIS_SCAN || state == AxisState::AXIS_POINT;
+}
+
+SystemStatus::SystemStatus()
+    : state(SystemState::SYSTEM_OFF)
+    , reftime(0)
+    , apptime(0)
+    , dcsync(0)
+{}
+
 class Control::Impl {
 public:
     ~Impl() {
@@ -84,6 +117,8 @@ protected:
         , m_domain(NULL)
         , m_domain_data(NULL)
     {
+        std::memset(m_pos_pulse_offset, 0, AXIS_COUNT * sizeof(int32_t));
+
         try {
             // Создаем мастер-объект
             m_master = ecrt_request_master(0);
@@ -280,14 +315,33 @@ protected:
         }
     }
 
-    void SetModeRun(const Axis& axis, int32_t pos, int32_t vel) {
+    bool SetPositionPulseOffset(const Axis& axis, int32_t offset) {
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        m_pos_pulse_offset[axis] = offset;
+
+        return true;
+    }
+
+    bool SetModeRun(const Axis& axis, int32_t pos /*deg*/, int32_t vel /*deg/sec*/) {
+        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        if (! is_system_ready(s)) {
+            return false;
+        }
+
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
         if (vel) {
             TXCmd txcmd;
 
             // Переходим в режим "Profile velocity mode" и сразу задаем требуемую скорость
             txcmd.ctrlword = 0xF;
             txcmd.op_mode = OP_MODE_SCAN;
-            txcmd.tgt_vel = vel;
+            txcmd.tgt_vel = vel_deg2pulse(vel) + m_pos_pulse_offset[axis];
             txcmd.tgt_pos = 0;
             m_tx_queues[axis].push(txcmd);
         } else {
@@ -302,12 +356,23 @@ protected:
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x1F;
             txcmd.op_mode = OP_MODE_POINT;
-            txcmd.tgt_pos = pos;
+            txcmd.tgt_pos = pos_deg2pulse(pos, s.axes[axis].cur_pos);
             m_tx_queues[axis].push(txcmd);
         }
+
+        return true;
     }
 
-    void SetModeIdle(const Axis& axis) {
+    bool SetModeIdle(const Axis& axis) {
+        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        if (! is_system_ready(s)) {
+            return false;
+        }
+
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
         TXCmd txcmd;
         txcmd.ctrlword = 0x6;
         txcmd.op_mode = OP_MODE_IDLE;
@@ -315,6 +380,8 @@ protected:
         txcmd.tgt_pos = 0;
 
         m_tx_queues[axis].push(txcmd);
+
+        return true;
     }
 
     const boost::atomic<SystemStatus>& GetStatus() const {
@@ -509,9 +576,50 @@ private:
         return true;
     }
 
+    bool is_system_ready(const SystemStatus& s) const {
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            if (! s.axes[axis].IsReady()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool is_axis_valid(const Axis& axis) {
+        return (axis >= Axis::AXIS_MIN) && (axis < Axis::AXIS_COUNT);
+    }
+
+    int32_t vel_deg2pulse(double vel_deg) {
+        const int32_t vel_pulse = static_cast<decltype(vel_pulse)>(vel_deg * kPulsesPerDegree);
+        return vel_pulse;
+    }
+
+    double vel_pulse2deg(int32_t vel_pulse) {
+        return static_cast<double>(vel_pulse) / kPulsesPerDegree;
+    }
+
+    int32_t pos_deg2pulse(double pos_deg, int32_t cur_pos_pulse) {
+        std::fmod(pos_deg, static_cast<decltype(pos_deg)>(kDegPerTurn));
+        const int32_t local_pos_pulse = static_cast<decltype(local_pos_pulse)>(pos_deg * kPulsesPerDegree);
+        const int32_t local_cur_pos_pulse = cur_pos_pulse % kPulsesPerTurn;
+        const int32_t cur_round_pos_pulse = (cur_pos_pulse >= 0)
+                                            ? cur_pos_pulse - local_cur_pos_pulse
+                                            : cur_pos_pulse + local_cur_pos_pulse;
+
+        const int32_t abs_pos_pulse = cur_round_pos_pulse + local_pos_pulse;
+
+        return abs_pos_pulse;
+    }
+
+    double pos_pulse2deg(int32_t pos_pulse) {
+        const int32_t local_pos_pulse = pos_pulse % kPulsesPerTurn;
+        return static_cast<double>(local_pos_pulse) / kPulsesPerDegree;
+    }
+
     uint64_t get_app_time() {
         const uint64_t since_epoch_ns = boost::chrono::system_clock::now().time_since_epoch().count();
-        const uint64_t since_1_1_2000_ns = since_epoch_ns - 946684800000000000ULL;
+        const uint64_t since_1_1_2000_ns = since_epoch_ns - kEpoch112000DiffNs;
 
         return since_1_1_2000_ns;
     }
@@ -554,22 +662,6 @@ private:
                                       << val << ":" << val_size << ", abort_code=" << abort_code);
             }
         }
-
-        //! @todo Remove this when drives are setup from config file
-        /*
-        uint32_t val = 5000;
-        uint32_t abort_code;
-        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-            int result = 0;
-            result |= ecrt_master_sdo_download(m_master, axis, 0x6083, 0, reinterpret_cast<uint8_t*>(&val), sizeof(val), &abort_code);
-            result |= ecrt_master_sdo_download(m_master, axis, 0x6084, 0, reinterpret_cast<uint8_t*>(&val), sizeof(val), &abort_code);
-            if (result) {
-                return false;
-            }
-        }
-
-        return true;
-        */
     }
 
     SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& cycle_info) {
@@ -577,12 +669,21 @@ private:
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Читаем данные PDO для двигателя c индексом axis
-            sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]) /*% kPositionMaxValue*/;
-            sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]) /*% kPositionMaxValue*/;
-            sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]) /*% kPositionMaxValue*/;
+
+            sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
+            sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]);
+            sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]);
             sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
             sys.axes[axis].tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
             sys.axes[axis].dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
+
+            sys.axes[axis].cur_pos_deg = pos_pulse2deg(sys.axes[axis].cur_pos - m_pos_pulse_offset[axis]);
+            sys.axes[axis].tgt_pos_deg = pos_pulse2deg(sys.axes[axis].tgt_pos - m_pos_pulse_offset[axis]);
+            sys.axes[axis].dmd_pos_deg = pos_pulse2deg(sys.axes[axis].dmd_pos - m_pos_pulse_offset[axis]);
+            sys.axes[axis].cur_vel_deg = vel_pulse2deg(sys.axes[axis].cur_vel - m_pos_pulse_offset[axis]);
+            sys.axes[axis].tgt_vel_deg = vel_pulse2deg(sys.axes[axis].tgt_vel - m_pos_pulse_offset[axis]);
+            sys.axes[axis].dmd_vel_deg = vel_pulse2deg(sys.axes[axis].dmd_vel - m_pos_pulse_offset[axis]);
+
             sys.axes[axis].cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
             sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
             sys.axes[axis].statusword = EC_READ_U16(m_domain_data + m_offro_status[axis]);
@@ -612,9 +713,8 @@ private:
             }
         }
 
-        sys.prev_apptime = sys.apptime;
-        sys.apptime = apptime;
-        sys.reftime = reftime;
+        sys.reftime = reftime + kEpoch112000DiffNs;
+        sys.apptime = apptime + kEpoch112000DiffNs;
         sys.dcsync = dcsync;
 
         // @todo Слишком часто
@@ -718,11 +818,17 @@ private:
     boost::atomic<bool>             m_stop_flag;    //!< Флаг остановки потока взаимодействия
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
 
+
+    const static uint64_t           kMaxAxisReadyCycles     = 8192;
+    const static uint64_t           kMaxDomainInitCycles    = 8192;
+    const static uint64_t           kPulsesPerTurn          = 1048576; // 2^20
+    const static uint64_t           kDegPerTurn             = 360;
+    const static double             kPulsesPerDegree        = 1048576.0 / 360.0;
+    const static uint64_t           kEpoch112000DiffNs      = 946684800000000000ULL;
     const static uint32_t           kCmdQueueCapacity       = 128;
     const static uint32_t           kCyclePeriodNs          = 1000000;
     const static uint32_t           kRegPerDriveCount       = 12;
-    const static uint64_t           kMaxAxisReadyCycles     = 8192;
-    const static uint64_t           kMaxDomainInitCycles    = 8192;
+
 
     typedef boost::lockfree::spsc_queue<TXCmd, boost::lockfree::capacity<kCmdQueueCapacity>> TXCmdQueue;
     TXCmdQueue                      m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
@@ -748,6 +854,8 @@ private:
     uint32_t                        m_offrw_prof_vel[AXIS_COUNT];
     uint32_t                        m_offrw_act_mode[AXIS_COUNT];
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
+
+    int32_t                         m_pos_pulse_offset[AXIS_COUNT];
 };
 
 const uint32_t Control::Impl::kCmdQueueCapacity;
@@ -755,6 +863,10 @@ const uint32_t Control::Impl::kCyclePeriodNs;
 const uint32_t Control::Impl::kRegPerDriveCount;
 const uint64_t Control::Impl::kMaxAxisReadyCycles;
 const uint64_t Control::Impl::kMaxDomainInitCycles;
+const uint64_t Control::Impl::kPulsesPerTurn;
+const uint64_t Control::Impl::kDegPerTurn;
+const double   Control::Impl::kPulsesPerDegree;
+const uint64_t Control::Impl::kEpoch112000DiffNs;
 
 Control::Control(const Config::Storage& config)
     : m_pimpl(new Control::Impl(config))
@@ -763,12 +875,16 @@ Control::Control(const Config::Storage& config)
 Control::~Control() {
 }
 
-void Control::SetModeRun(const Axis& axis, int32_t pos, int32_t vel) {
-    m_pimpl->SetModeRun(axis, pos, vel);
+bool Control::SetPositionPulseOffset(const Axis& axis, int32_t offset) {
+    return m_pimpl->SetPositionPulseOffset(axis, offset);
 }
 
-void Control::SetModeIdle(const Axis& axis) {
-    m_pimpl->SetModeIdle(axis);
+bool Control::SetModeRun(const Axis& axis, int32_t pos, int32_t vel) {
+    return m_pimpl->SetModeRun(axis, pos, vel);
+}
+
+bool Control::SetModeIdle(const Axis& axis) {
+    return m_pimpl->SetModeIdle(axis);
 }
 
 const boost::atomic<SystemStatus>& Control::GetStatus() const {

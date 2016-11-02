@@ -67,22 +67,16 @@ enum AxisState : int32_t {
 
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
-    AxisStatus()
-        : tgt_pos(0)
-        , cur_pos(0)
-        , dmd_pos(0)
-        , tgt_vel(0)
-        , cur_vel(0)
-        , dmd_vel(0)
-        , cur_torq(0)
-        , state(AxisState::AXIS_OFF)
-        , error_code(0)
-        , cur_temperature(0)
-        , ctrlword(0)
-        , statusword(0)
-        , mode(0)
-    {}
+    AxisStatus();
 
+    bool IsReady() const;
+
+    double      tgt_pos_deg;            //!< Целевая позиция [градусы]
+    double      cur_pos_deg;            //!< Текущая позиция [градусы]
+    double      dmd_pos_deg;            //!< Запрашиваемая позиция [градусы]
+    double      tgt_vel_deg;            //!< Целевая скорость [градусы/с]
+    double      cur_vel_deg;            //!< Текущая скорость [градусы/с]
+    double      dmd_vel_deg;            //!< Запрашиваемая скорость [импульсы энкодера/c]
     int32_t     tgt_pos;                //!< Целевая позиция [импульсы энкодера]
     int32_t     cur_pos;                //!< Текущая позиция [импульсы энкодера]
     int32_t     dmd_pos;                //!< Запрашиваемая позиция [импульсы энкодера]
@@ -107,28 +101,23 @@ enum SystemState : int32_t {
 
 //! @brief Текущие значения, возвращаемые системой управления
 struct SystemStatus {
-    SystemStatus()
-        : state(SystemState::SYSTEM_OFF)
-        //, error_str()
-    {}
+    SystemStatus();
 
     AxisStatus axes[AXIS_COUNT];    //!< Статус двигателей по осям
     SystemState state;              //!< Состояние системы
-    uint64_t prev_apptime;
-    uint64_t apptime;
-    uint64_t reftime;
-    uint32_t dcsync;
+    uint64_t reftime;               //!< Время привязки координат в системном времени [наносекунды с начала Epoch]
+    uint64_t apptime;               //!< Текущее системное время [наносекунды с начала Epoch]
+    uint32_t dcsync;                //!< Оценка сверху разницы во времени между хостом и двигателем [наносекунды]
 
-    uint32_t latency_ns;
-    uint32_t latency_min_ns;
-    uint32_t latency_max_ns;
-    uint32_t period_ns;
-    uint32_t period_min_ns;
-    uint32_t period_max_ns;
-    uint32_t exec_ns;
-    uint32_t exec_min_ns;
-    uint32_t exec_max_ns;
-    // std::string error_str;          //!< Описание ошибки или пустая строка
+//    uint32_t latency_ns;
+//    uint32_t latency_min_ns;
+//    uint32_t latency_max_ns;
+//    uint32_t period_ns;
+//    uint32_t period_min_ns;
+//    uint32_t period_max_ns;
+//    uint32_t exec_ns;
+//    uint32_t exec_min_ns;
+//    uint32_t exec_max_ns;
 };
 
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
@@ -171,6 +160,12 @@ public:
      */
     ~Control();
 
+    /*! @brief Задаем смещения координат для осей,
+     *
+     *  @return Флаг успешности операции.
+     */
+    bool SetPositionPulseOffset(const Axis& axis, int32_t offset);
+
     /*! @brief В зависимости от значений параметров, задает разные режимы работы двигателей по осям (позиционирование в точку или сканирование).
      *
      *  Соответственно для каждой оси:
@@ -198,19 +193,24 @@ public:
      *  фиксированным моментом (задаваемым в настройках).
      *
      *  @param  axis                Идентификатор двигателя
-     *  @param  pos                 Фиксированный позиция, в которую перемещается двигатель [импульсы энкодера]
-     *  @param  vel                 Скорость, с которой двигатель вращается в режиме постоянной скорости (это НЕ скорость с которой он перемещается в заданную позицию) [импульсы энкодера/с]
+     *  @param  pos                 Фиксированный позиция, в которую перемещается двигатель [градусы]
+     *  @param  vel                 Скорость, с которой двигатель вращается в режиме постоянной скорости
+     *                              (это НЕ скорость с которой он перемещается в заданную позицию) [градусы/с]
+     *
+     *  @return                     Флаг успешности операции
      */
-    void SetModeRun(const Axis& axis, int32_t pos, int32_t vel);
+    bool SetModeRun(const Axis& axis, int32_t pos /*deg*/, int32_t vel /*deg/s*/);
 
     /*! @brief Переключает систему управления в режим бездейсвтия.
      *
      *  @param  axis                Идентификатор двигателя
      *
+     *  @return                     Флаг успешности операции
+     *
      *  @attention При возникновении ошибки этот вызов также сбрасывает состояние ошибки
      *             и приводит систему в состояние готовности к дальнейшей работе.
      */
-    void SetModeIdle(const Axis& axis);
+    bool SetModeIdle(const Axis& axis);
 
     /*! @brief Получаем текущее состояние системы управления (динамически изменяемые)
      *
