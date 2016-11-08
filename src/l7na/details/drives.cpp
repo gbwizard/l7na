@@ -325,7 +325,7 @@ protected:
         return true;
     }
 
-    bool SetModeRun(const Axis& axis, int32_t pos /*deg*/, int32_t vel /*deg/sec*/) {
+    bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/sec*/) {
         const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
         if (! is_system_ready(s)) {
             return false;
@@ -341,7 +341,7 @@ protected:
             // Переходим в режим "Profile velocity mode" и сразу задаем требуемую скорость
             txcmd.ctrlword = 0xF;
             txcmd.op_mode = OP_MODE_SCAN;
-            txcmd.tgt_vel = vel_deg2pulse(vel) + m_pos_pulse_offset[axis];
+            txcmd.tgt_vel = vel_deg2pulse(vel);
             txcmd.tgt_pos = 0;
             m_tx_queues[axis].push(txcmd);
         } else {
@@ -356,7 +356,7 @@ protected:
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x1F;
             txcmd.op_mode = OP_MODE_POINT;
-            txcmd.tgt_pos = pos_deg2pulse(pos, s.axes[axis].cur_pos);
+            txcmd.tgt_pos = pos_deg2pulse(pos, s.axes[axis].cur_pos) + m_pos_pulse_offset[axis];
             m_tx_queues[axis].push(txcmd);
         }
 
@@ -384,8 +384,12 @@ protected:
         return true;
     }
 
-    const boost::atomic<SystemStatus>& GetStatus() const {
+    const boost::atomic<SystemStatus>& GetStatusRef() const {
         return m_sys_status;
+    }
+
+    SystemStatus GetStatusCopy() const {
+        return m_sys_status.load(boost::memory_order_acquire);
     }
 
     const SystemInfo& GetSystemInfo() const {
@@ -599,17 +603,19 @@ private:
         return static_cast<double>(vel_pulse) / kPulsesPerDegree;
     }
 
-    int32_t pos_deg2pulse(double pos_deg, int32_t cur_pos_pulse) {
-        std::fmod(pos_deg, static_cast<decltype(pos_deg)>(kDegPerTurn));
-        const int32_t local_pos_pulse = static_cast<decltype(local_pos_pulse)>(pos_deg * kPulsesPerDegree);
+    int32_t pos_deg2pulse(double tgt_pos_deg, int32_t cur_pos_pulse) {
+        // Нормализуем количество градусов к диапазону [0, 360]
+        std::fmod(tgt_pos_deg, static_cast<decltype(tgt_pos_deg)>(kDegPerTurn));
+        if (tgt_pos_deg < 0) {
+            tgt_pos_deg = static_cast<decltype(tgt_pos_deg)>(kDegPerTurn) + tgt_pos_deg;
+        }
+
+        const int32_t tgt_pos_pulse = static_cast<decltype(tgt_pos_pulse)>(tgt_pos_deg * kPulsesPerDegree);
         const int32_t local_cur_pos_pulse = cur_pos_pulse % kPulsesPerTurn;
-        const int32_t cur_round_pos_pulse = (cur_pos_pulse >= 0)
-                                            ? cur_pos_pulse - local_cur_pos_pulse
-                                            : cur_pos_pulse + local_cur_pos_pulse;
+        const int32_t round_cur_pos_pulse =  cur_pos_pulse - local_cur_pos_pulse;
+        const int32_t res_pos_pulse = round_cur_pos_pulse + tgt_pos_pulse;
 
-        const int32_t abs_pos_pulse = cur_round_pos_pulse + local_pos_pulse;
-
-        return abs_pos_pulse;
+        return res_pos_pulse;
     }
 
     double pos_pulse2deg(int32_t pos_pulse) {
@@ -680,9 +686,9 @@ private:
             sys.axes[axis].cur_pos_deg = pos_pulse2deg(sys.axes[axis].cur_pos - m_pos_pulse_offset[axis]);
             sys.axes[axis].tgt_pos_deg = pos_pulse2deg(sys.axes[axis].tgt_pos - m_pos_pulse_offset[axis]);
             sys.axes[axis].dmd_pos_deg = pos_pulse2deg(sys.axes[axis].dmd_pos - m_pos_pulse_offset[axis]);
-            sys.axes[axis].cur_vel_deg = vel_pulse2deg(sys.axes[axis].cur_vel - m_pos_pulse_offset[axis]);
-            sys.axes[axis].tgt_vel_deg = vel_pulse2deg(sys.axes[axis].tgt_vel - m_pos_pulse_offset[axis]);
-            sys.axes[axis].dmd_vel_deg = vel_pulse2deg(sys.axes[axis].dmd_vel - m_pos_pulse_offset[axis]);
+            sys.axes[axis].cur_vel_deg = vel_pulse2deg(sys.axes[axis].cur_vel);
+            sys.axes[axis].tgt_vel_deg = vel_pulse2deg(sys.axes[axis].tgt_vel);
+            sys.axes[axis].dmd_vel_deg = vel_pulse2deg(sys.axes[axis].dmd_vel);
 
             sys.axes[axis].cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
             sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
@@ -879,7 +885,7 @@ bool Control::SetPositionPulseOffset(const Axis& axis, int32_t offset) {
     return m_pimpl->SetPositionPulseOffset(axis, offset);
 }
 
-bool Control::SetModeRun(const Axis& axis, int32_t pos, int32_t vel) {
+bool Control::SetModeRun(const Axis& axis, double pos, double vel) {
     return m_pimpl->SetModeRun(axis, pos, vel);
 }
 
@@ -887,8 +893,12 @@ bool Control::SetModeIdle(const Axis& axis) {
     return m_pimpl->SetModeIdle(axis);
 }
 
-const boost::atomic<SystemStatus>& Control::GetStatus() const {
-    return m_pimpl->GetStatus();
+const boost::atomic<SystemStatus>& Control::GetStatusRef() const {
+    return m_pimpl->GetStatusRef();
+}
+
+SystemStatus Control::GetStatusCopy() const {
+    return m_pimpl->GetStatusCopy();
 }
 
 const SystemInfo& Control::GetSystemInfo() const {

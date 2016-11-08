@@ -199,7 +199,7 @@ public:
      *
      *  @return                     Флаг успешности операции
      */
-    bool SetModeRun(const Axis& axis, int32_t pos /*deg*/, int32_t vel /*deg/s*/);
+    bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/s*/);
 
     /*! @brief Переключает систему управления в режим бездейсвтия.
      *
@@ -216,7 +216,9 @@ public:
      *
      *  @return Структуру Status, заполненную актуальными данными.
      */
-    const boost::atomic<SystemStatus>& GetStatus() const;
+    const boost::atomic<SystemStatus>& GetStatusRef() const;
+
+    SystemStatus GetStatusCopy() const;
 
     /*! @brief Получаем статические параметры системы (не изменяющиеся с течением времени).
      *

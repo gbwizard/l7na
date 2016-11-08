@@ -22,21 +22,21 @@ namespace blog = boost::log;
 
 struct Command {
     Drives::Axis axis;
-    int32_t pos;
-    int32_t vel;
+    double pos;
+    double vel;
     bool idle;
 
     Command()
         : axis(Drives::AZIMUTH_AXIS)
-        , pos(0)
-        , vel(0)
+        , pos(0.0)
+        , vel(0.0)
         , idle(false)
     {}
 
     void clear() {
         axis = Drives::AZIMUTH_AXIS;
-        pos = 0;
-        vel = 0;
+        pos = 0.0;
+        vel = 0.0;
         idle = false;
     }
 };
@@ -65,14 +65,14 @@ bool parse_args(const std::string& cmd_str, Command& result) {
                 return false;
             }
 
-            result.vel = std::atoi(cmd_vec[2].c_str());
+            result.vel = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "p") {
             if (cmd_vec.size() < 3) {
                 std::cerr << "Invalid input for command 'a p'" << std::endl;
                 return false;
             }
 
-            result.pos = std::atoi(cmd_vec[2].c_str());
+            result.pos = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "i") {
             result.idle = true;
         }
@@ -89,14 +89,14 @@ bool parse_args(const std::string& cmd_str, Command& result) {
                 return false;
             }
 
-            result.vel = std::atoi(cmd_vec[2].c_str());
+            result.vel = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "p") {
             if (cmd_vec.size() < 3) {
                 std::cerr << "Invalid input for command 'e p'" << std::endl;
                 return false;
             }
 
-            result.pos = std::atoi(cmd_vec[2].c_str());
+            result.pos = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "i") {
             result.idle = true;
         }
@@ -258,7 +258,7 @@ int main(int argc, char* argv[]) {
 
     std::cerr << "Please, specify your commands here:" << std::endl;
 
-    const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatus();
+    const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatusRef();
 
     StatReader statreader(sys_status, log_file_path, log_rate_us);
     boost::thread statthread(boost::bind(&StatReader::CycleRead, &statreader));
