@@ -14,3 +14,4 @@ src/utils/klm.c
 src/utils/servotech.c
 src/utils/servotech3.c
 src/utils/test.cpp
+src/utils/servotests.cpp

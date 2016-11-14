@@ -2,6 +2,7 @@
 #include <errno.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cmath>
 #include <thread>
 #include <chrono>
@@ -29,6 +30,7 @@ namespace fs = boost::filesystem;
 typedef boost::chrono::system_clock SysClock;
 
 DECLARE_EXCEPTION(Exception, common::Exception);
+DECLARE_EXCEPTION(TestFailedException, common::Exception);
 
 struct CycleTimeInfo {
     SysClock::duration period_ns;
@@ -356,7 +358,7 @@ protected:
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x1F;
             txcmd.op_mode = OP_MODE_POINT;
-            txcmd.tgt_pos = pos_deg2pulse(pos, s.axes[axis].cur_pos) + m_pos_pulse_offset[axis];
+            txcmd.tgt_pos = pos_deg2pulse(pos, s.axes[axis].cur_pos - m_pos_pulse_offset[axis]) + m_pos_pulse_offset[axis];
             m_tx_queues[axis].push(txcmd);
         }
 
@@ -594,31 +596,67 @@ private:
         return (axis >= Axis::AXIS_MIN) && (axis < Axis::AXIS_COUNT);
     }
 
-    int32_t vel_deg2pulse(double vel_deg) {
+    static int32_t vel_deg2pulse(double vel_deg) {
         const int32_t vel_pulse = static_cast<decltype(vel_pulse)>(vel_deg * kPulsesPerDegree);
         return vel_pulse;
     }
 
-    double vel_pulse2deg(int32_t vel_pulse) {
+    static double vel_pulse2deg(int32_t vel_pulse) {
         return static_cast<double>(vel_pulse) / kPulsesPerDegree;
     }
 
-    int32_t pos_deg2pulse(double tgt_pos_deg, int32_t cur_pos_pulse) {
+    static int32_t pos_deg2pulse(double tgt_pos_deg, int32_t cur_pos_pulse) {
+        const static int32_t kPulsesPerHalfTurn = kPulsesPerTurn / 2;
+
         // Нормализуем количество градусов к диапазону [0, 360]
         std::fmod(tgt_pos_deg, static_cast<decltype(tgt_pos_deg)>(kDegPerTurn));
         if (tgt_pos_deg < 0) {
             tgt_pos_deg = static_cast<decltype(tgt_pos_deg)>(kDegPerTurn) + tgt_pos_deg;
         }
 
-        const int32_t tgt_pos_pulse = static_cast<decltype(tgt_pos_pulse)>(tgt_pos_deg * kPulsesPerDegree);
-        const int32_t local_cur_pos_pulse = cur_pos_pulse % kPulsesPerTurn;
-        const int32_t round_cur_pos_pulse =  cur_pos_pulse - local_cur_pos_pulse;
-        const int32_t res_pos_pulse = round_cur_pos_pulse + tgt_pos_pulse;
+        const int32_t local_tgt_pos_pulse = static_cast<decltype(local_tgt_pos_pulse)>(tgt_pos_deg * kPulsesPerDegree);
+
+        int32_t res_pos_pulse = 0;
+        if (cur_pos_pulse >= 0) {
+            const int32_t local_cur_pos_pulse = cur_pos_pulse % kPulsesPerTurn;
+            const int32_t roundl_cur_pos_pulse = cur_pos_pulse - local_cur_pos_pulse;
+
+            if (local_tgt_pos_pulse >= local_cur_pos_pulse) {
+                if (local_tgt_pos_pulse - local_cur_pos_pulse >= kPulsesPerHalfTurn) {
+                    res_pos_pulse = roundl_cur_pos_pulse - kPulsesPerTurn + local_tgt_pos_pulse;
+                } else {
+                    res_pos_pulse = roundl_cur_pos_pulse + local_tgt_pos_pulse;
+                }
+            } else {
+                if (local_cur_pos_pulse - local_tgt_pos_pulse >= kPulsesPerHalfTurn) {
+                    res_pos_pulse = roundl_cur_pos_pulse + kPulsesPerTurn + local_tgt_pos_pulse;
+                } else {
+                    res_pos_pulse = roundl_cur_pos_pulse + local_tgt_pos_pulse;
+                }
+            }
+        } else {
+            const int32_t local_cur_pos_pulse = kPulsesPerTurn + (cur_pos_pulse % kPulsesPerTurn);
+            const int32_t roundl_cur_pos_pulse = cur_pos_pulse - local_cur_pos_pulse;
+
+            if (local_tgt_pos_pulse >= local_cur_pos_pulse) {
+                if (local_tgt_pos_pulse - local_cur_pos_pulse >= kPulsesPerHalfTurn) {
+                    res_pos_pulse = roundl_cur_pos_pulse - kPulsesPerTurn + local_tgt_pos_pulse;
+                } else {
+                    res_pos_pulse = roundl_cur_pos_pulse + local_tgt_pos_pulse;
+                }
+            } else {
+                if (local_cur_pos_pulse - local_tgt_pos_pulse >= kPulsesPerHalfTurn) {
+                    res_pos_pulse = roundl_cur_pos_pulse + kPulsesPerTurn + local_tgt_pos_pulse;
+                } else {
+                    res_pos_pulse = roundl_cur_pos_pulse + local_tgt_pos_pulse;
+                }
+            }
+        }
 
         return res_pos_pulse;
     }
 
-    double pos_pulse2deg(int32_t pos_pulse) {
+    static double pos_pulse2deg(int32_t pos_pulse) {
         const int32_t local_pos_pulse = pos_pulse % kPulsesPerTurn;
         return static_cast<double>(local_pos_pulse) / kPulsesPerDegree;
     }
@@ -795,6 +833,40 @@ private:
         ++cycles_cur;
     }
 
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // TESTS
+
+    static void TEST_pos_deg2pulse() {
+        struct TestResultChecker {
+            void operator()(int32_t result, int32_t expected, const std::string& name) {
+                if (result == expected) {
+                    std::cout << "Test " << name << ": OK" << std::endl;
+                } else {
+                    std::cout << "Test " << name << ": FAILED (result=" << result
+                              << ", expect=" << expected << ")" << std::endl;
+                }
+            }
+        };
+
+        TestResultChecker checker;
+        checker(pos_deg2pulse(0, 0), 0, "Zero2zero");
+        checker(pos_deg2pulse(0, 100000), 0, "Zero2zero2");
+        checker(pos_deg2pulse(0, 600000), 1048576, "Zero2zero3");
+
+        checker(pos_deg2pulse(300, 7400000), 7165269, "CurPosPulse>=0,LocalTgtPosPulse>=LocalCurPosPulse,LocalTgt2Cur>=HalfTurn");
+        checker(pos_deg2pulse(50, 7400000), 7485667, "CurPosPulse>=0,LocalTgtPosPulse>=LocalCurPosPulse,LocalTgt2Cur<HalfTurn");
+
+        checker(pos_deg2pulse(50, 8300000), 8534243, "CurPosPulse>=0,LocalTgtPosPulse<LocalCurPosPulse,LocalTgt2Cur>=HalfTurn");
+        checker(pos_deg2pulse(300, 8300000), 8213845, "CurPosPulse>=0,LocalTgtPosPulse<LocalCurPosPulse,LocalTgt2Cur<HalfTurn");
+
+        checker(pos_deg2pulse(300, -7300000), -7514795, "CurPosPulse<0,TgtPosPulse>=CurPosPulse,Tgt2Cur>=HalfTurn");
+        checker(pos_deg2pulse(50, -7300000), -7194397, "CurPosPulse<0,TgtPosPulse>=CurPosPulse,Tgt2Cur<HalfTurn");
+
+        checker(pos_deg2pulse(50, -7400000), -7194397, "CurPosPulse<0,TgtPosPulse<CurPosPulse,Tgt2Cur>=HalfTurn");
+        checker(pos_deg2pulse(300, -7400000), -7514795, "CurPosPulse<0,TgtPosPulse<CurPosPulse,Tgt2Cur<HalfTurn");
+    }
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
     enum OperationMode : uint8_t {
         OP_MODE_IDLE = 0,
         OP_MODE_POINT = 1,
@@ -827,8 +899,8 @@ private:
 
     const static uint64_t           kMaxAxisReadyCycles     = 8192;
     const static uint64_t           kMaxDomainInitCycles    = 8192;
-    const static uint64_t           kPulsesPerTurn          = 1048576; // 2^20
-    const static uint64_t           kDegPerTurn             = 360;
+    const static int32_t            kPulsesPerTurn          = 1048576; // 2^20
+    const static int32_t            kDegPerTurn             = 360;
     const static double             kPulsesPerDegree        = 1048576.0 / 360.0;
     const static uint64_t           kEpoch112000DiffNs      = 946684800000000000ULL;
     const static uint32_t           kCmdQueueCapacity       = 128;
@@ -869,8 +941,8 @@ const uint32_t Control::Impl::kCyclePeriodNs;
 const uint32_t Control::Impl::kRegPerDriveCount;
 const uint64_t Control::Impl::kMaxAxisReadyCycles;
 const uint64_t Control::Impl::kMaxDomainInitCycles;
-const uint64_t Control::Impl::kPulsesPerTurn;
-const uint64_t Control::Impl::kDegPerTurn;
+const int32_t  Control::Impl::kPulsesPerTurn;
+const int32_t  Control::Impl::kDegPerTurn;
 const double   Control::Impl::kPulsesPerDegree;
 const uint64_t Control::Impl::kEpoch112000DiffNs;
 
@@ -903,6 +975,10 @@ SystemStatus Control::GetStatusCopy() const {
 
 const SystemInfo& Control::GetSystemInfo() const {
     return m_pimpl->GetSystemInfo();
+}
+
+void Control::RunStaticTests() {
+    Control::Impl::TEST_pos_deg2pulse();
 }
 
 } // namespaces

@@ -226,6 +226,10 @@ public:
      */
     const SystemInfo& GetSystemInfo() const;
 
+    /*! @brief Запускаем статические тесты, печатаем результат
+     */
+    static void RunStaticTests();
+
 private:
     class Impl;
     std::unique_ptr<Impl> m_pimpl;
