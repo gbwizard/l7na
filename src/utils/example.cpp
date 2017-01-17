@@ -127,8 +127,8 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
          os << "|" << axis << "|" << status.axes[axis].state << "|" << std::hex << "0x" << status.axes[axis].statusword << "|" << status.axes[axis].ctrlword
                   << std::dec << "|" << status.axes[axis].mode
-                  << "|" << status.axes[axis].cur_pos  << "|" << status.axes[axis].tgt_pos << "|" << status.axes[axis].dmd_pos
-                  << "|" << status.axes[axis].cur_vel  << "|" << status.axes[axis].tgt_vel << "|" << status.axes[axis].dmd_vel
+                  << "|" << status.axes[axis].cur_pos_deg  << "|" << status.axes[axis].tgt_pos_deg << "|" << status.axes[axis].dmd_pos_deg
+                  << "|" << status.axes[axis].cur_vel_deg  << "|" << status.axes[axis].tgt_vel_deg << "|" << status.axes[axis].dmd_vel_deg
                   << "|" << status.axes[axis].cur_torq << "|" << status.axes[axis].cur_temperature;
     }
     os << std::endl;
