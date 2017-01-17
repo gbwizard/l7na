@@ -609,7 +609,7 @@ private:
         const static int32_t kPulsesPerHalfTurn = kPulsesPerTurn / 2;
 
         // Нормализуем количество градусов к диапазону [0, 360]
-        std::fmod(tgt_pos_deg, static_cast<decltype(tgt_pos_deg)>(kDegPerTurn));
+        tgt_pos_deg = std::fmod(tgt_pos_deg, static_cast<decltype(tgt_pos_deg)>(kDegPerTurn));
         if (tgt_pos_deg < 0) {
             tgt_pos_deg = static_cast<decltype(tgt_pos_deg)>(kDegPerTurn) + tgt_pos_deg;
         }
