@@ -63,12 +63,13 @@ AxisStatus::AxisStatus()
     , tgt_vel_deg(0.0)
     , cur_vel_deg(0.0)
     , dmd_vel_deg(0.0)
-    , tgt_pos(0)
+    , cur_pos_abs(0)
     , cur_pos(0)
     , dmd_pos(0)
-    , tgt_vel(0)
+    , tgt_pos(0)
     , cur_vel(0)
     , dmd_vel(0)
+    , tgt_vel(0)
     , cur_torq(0)
     , state(AxisState::AXIS_OFF)
     , error_code(0)
@@ -402,7 +403,7 @@ protected:
         bool op_state = false;
         uint64_t cycles_total = 0;
 
-        SysClock::time_point wakeup_time = SysClock::now(), last_start_time = {}, start_time = {}, end_time = {};
+        SysClock::time_point wakeup_time = SysClock::now()/*, last_start_time = {}, start_time = {}, end_time = {}*/;
 
         while (! op_state && ! m_stop_flag.load(boost::memory_order_consume)) {
             wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
@@ -499,17 +500,12 @@ protected:
             ecrt_domain_state(m_domain, &m_domain_state);
 
             // Получаем верхнюю оценку синхронизации
-            uint32_t dcsync = ecrt_master_sync_monitor_process(m_master);
+            const uint32_t dcsync = ecrt_master_sync_monitor_process(m_master);
 
             // Получаем значение референсных часов
             uint32_t lo_ref_time = 0;
-            int err = ecrt_master_reference_clock_time(m_master, &lo_ref_time);
-            if (err == -ENXIO) {
-                SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
-                s.state = SystemState::SYSTEM_ERROR;
-                m_sys_status.store(s);
-                // @todo save error code
-            } else if (err == -EIO) {
+            const int err = ecrt_master_reference_clock_time(m_master, &lo_ref_time);
+            if (err) {
                 SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
                 s.state = SystemState::SYSTEM_ERROR;
                 m_sys_status.store(s);
@@ -608,7 +604,7 @@ private:
     static int32_t pos_deg2pulse(double tgt_pos_deg, int32_t cur_pos_pulse) {
         const static int32_t kPulsesPerHalfTurn = kPulsesPerTurn / 2;
 
-        // Нормализуем количество градусов к диапазону [0, 360]
+        // Нормализуем количество градусов к диапазону [0, 360)
         tgt_pos_deg = std::fmod(tgt_pos_deg, static_cast<decltype(tgt_pos_deg)>(kDegPerTurn));
         if (tgt_pos_deg < 0) {
             tgt_pos_deg = static_cast<decltype(tgt_pos_deg)>(kDegPerTurn) + tgt_pos_deg;
@@ -900,15 +896,15 @@ private:
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
 
 
-    const static uint64_t           kMaxAxisReadyCycles     = 8192;
-    const static uint64_t           kMaxDomainInitCycles    = 8192;
-    const static int32_t            kPulsesPerTurn          = 1048576; // 2^20
-    const static int32_t            kDegPerTurn             = 360;
-    const static double             kPulsesPerDegree        = 1048576.0 / 360.0;
-    const static uint64_t           kEpoch112000DiffNs      = 946684800000000000ULL;
-    const static uint32_t           kCmdQueueCapacity       = 128;
-    const static uint32_t           kCyclePeriodNs          = 1000000;
-    const static uint32_t           kRegPerDriveCount       = 12;
+    constexpr static uint64_t           kMaxAxisReadyCycles     = 8192;
+    constexpr static uint64_t           kMaxDomainInitCycles    = 8192;
+    constexpr static int32_t            kPulsesPerTurn          = 1048576; // 2^20
+    constexpr static int32_t            kDegPerTurn             = 360;
+    constexpr static double             kPulsesPerDegree        = 1048576.0 / 360.0;
+    constexpr static uint64_t           kEpoch112000DiffNs      = 946684800000000000ULL;
+    constexpr static uint32_t           kCmdQueueCapacity       = 128;
+    constexpr static uint32_t           kCyclePeriodNs          = 1000000;
+    constexpr static uint32_t           kRegPerDriveCount       = 12;
 
 
     typedef boost::lockfree::spsc_queue<TXCmd, boost::lockfree::capacity<kCmdQueueCapacity>> TXCmdQueue;
@@ -938,16 +934,6 @@ private:
 
     int32_t                         m_pos_pulse_offset[AXIS_COUNT];
 };
-
-const uint32_t Control::Impl::kCmdQueueCapacity;
-const uint32_t Control::Impl::kCyclePeriodNs;
-const uint32_t Control::Impl::kRegPerDriveCount;
-const uint64_t Control::Impl::kMaxAxisReadyCycles;
-const uint64_t Control::Impl::kMaxDomainInitCycles;
-const int32_t  Control::Impl::kPulsesPerTurn;
-const int32_t  Control::Impl::kDegPerTurn;
-const double   Control::Impl::kPulsesPerDegree;
-const uint64_t Control::Impl::kEpoch112000DiffNs;
 
 Control::Control(const Config::Storage& config)
     : m_pimpl(new Control::Impl(config))
