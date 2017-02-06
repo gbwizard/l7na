@@ -102,7 +102,7 @@ if (CMAKE_COMPILER_IS_GNUCC)
        message(FATAL_ERROR "GCC version ${PROJECT_COMPILER_VERSION} is below ${PROJECT_MIN_GCC_VERSION}.")
     endif()
 
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 endif()
 
 # Выставляем флаги компиляции и линковки в зависимости от типа сборки.
