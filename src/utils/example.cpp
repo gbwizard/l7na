@@ -154,13 +154,16 @@ void print_status_cerr(const Drives::SystemStatus& status) {
         std::cerr << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
                   << std::dec << " mode: " << status.axes[axis].mode
                   << std::endl << "\t"
-                  << " cur_pos_deg: " << status.axes[axis].cur_pos_deg << " tgt_pos_deg: " << status.axes[axis].tgt_pos_deg << " dmd_pos_deg: " << status.axes[axis].dmd_pos_deg
-                  << " cur_vel_deg: " << status.axes[axis].cur_vel_deg << " tgt_vel_deg: " << status.axes[axis].tgt_vel_deg << " dmd_vel_deg: " << status.axes[axis].dmd_vel_deg
+                  << " cur/dmd/tgt_pos_deg     = " << status.axes[axis].cur_pos_deg << "/" << status.axes[axis].dmd_pos_deg << "/" << status.axes[axis].tgt_pos_deg
                   << std::endl << "\t"
-                  << " cur_pos_raw: " << status.axes[axis].cur_pos << " tgt_pos_raw: " << status.axes[axis].tgt_pos << " dmd_pos_raw: " << status.axes[axis].dmd_pos
-                  << " cur_vel_raw: " << status.axes[axis].cur_vel << " tgt_vel_raw: " << status.axes[axis].tgt_vel << " dmd_vel_raw: " << status.axes[axis].dmd_vel
+                  << " cur/dmd_vel_deg         = " << status.axes[axis].cur_vel_deg << "/" << status.axes[axis].dmd_vel_deg
                   << std::endl << "\t"
-                  << " cur_trq: " << status.axes[axis].cur_torq << " cur_tmp: " << status.axes[axis].cur_temperature << std::endl;
+                  << " abs/cur/dmd/tgt_pos_raw = " << status.axes[axis].cur_pos_abs << "/"  << status.axes[axis].cur_pos << "/" << status.axes[axis].dmd_pos << "/" << status.axes[axis].tgt_pos
+                  << std::endl << "\t"
+                  << " cur/dmd_vel_raw         = " << status.axes[axis].cur_vel << "/" << status.axes[axis].dmd_vel
+                  << std::endl << "\t"
+                  << " cur_trq: " << status.axes[axis].cur_torq << " cur_tmp: " << status.axes[axis].cur_temperature
+                  << std::endl;
     }
 }
 
