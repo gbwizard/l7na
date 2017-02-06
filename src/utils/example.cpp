@@ -259,9 +259,20 @@ int main(int argc, char* argv[]) {
     control.SetPositionPulseOffset(Drives::AZIMUTH_AXIS, 0);
     control.SetPositionPulseOffset(Drives::ELEVATION_AXIS, 85000);
 
-    std::cerr << "Please, specify your commands here:" << std::endl;
-
     const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatusRef();
+
+    std::cerr << "Waiting for system initialization..." << std::endl;
+
+    while (1) {
+        const Drives::SystemStatus sys_status_copy = sys_status.load(boost::memory_order_acquire);
+        if ((Drives::AxisState::AXIS_IDLE == sys_status_copy.axes[0].state)
+            && (Drives::AxisState::AXIS_IDLE == sys_status_copy.axes[1].state)) {
+            break;
+        }
+        boost::this_thread::sleep_for(boost::chrono::milliseconds(500));
+    }
+    std::cerr << "System is ready" << std::endl;
+    std::cerr << "Please, specify your commands here:" << std::endl;
 
     StatReader statreader(sys_status, log_file_path, log_rate_us);
     boost::thread statthread(boost::bind(&StatReader::CycleRead, &statreader));
