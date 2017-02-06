@@ -165,10 +165,10 @@ protected:
                 {0x607A, 0, 32},    // Target position value
                 {0x6062, 0, 32},    // Demand position value
                 {0x6064, 0, 32},    // Actual position value
-                {0x60FF, 0, 32},    // Target velocity value
+                {0x260D, 0, 32},    // Actual position value (absolute)
+                {0x603F, 0, 16},    // Error code
                 {0x606B, 0, 32},    // Demand velocity Value
                 {0x606C, 0, 32},    // Actual velocity value
-                {0x6081, 0, 32},    // Profile velocity value
                 {0x6077, 0, 16},    // Actual torque value
             };
 
@@ -217,6 +217,7 @@ protected:
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[ELEVATION_AXIS]},     //!< Demand velocity
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[ELEVATION_AXIS]},     //!< Actual velocity
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[ELEVATION_AXIS]},    //!< Profile velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x260D, 0, &m_offro_abs_pos[ELEVATION_AXIS]},     //!< Actual position (absolute)
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[ELEVATION_AXIS]},    //!< Actual drive mode of operation
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[ELEVATION_AXIS]},    //!< Actual torque
 
@@ -229,6 +230,7 @@ protected:
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[AZIMUTH_AXIS]},       //!< Demand velocity
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[AZIMUTH_AXIS]},       //!< Actual velocity
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[AZIMUTH_AXIS]},      //!< Profile velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x260D, 0, &m_offro_abs_pos[AZIMUTH_AXIS]},       //!< Actual position (absolute)
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_AXIS]},      //!< Actual drive mode of operation
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[AZIMUTH_AXIS]},      //!< Actual torque
 
@@ -714,6 +716,7 @@ private:
             // Читаем данные PDO для двигателя c индексом axis
 
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
+            sys.axes[axis].cur_pos_abs = EC_READ_S32(m_domain_data + m_offro_abs_pos[axis]);
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]);
             sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]);
             sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
@@ -808,13 +811,6 @@ private:
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
                 } else if (txcmd.op_mode == OP_MODE_POINT) {
-                    // Вычисляем нормализованные координаты точки позиционирования
-                    /*
-                    const int32_t cur_denorm_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
-                    const int32_t cur_norm_pos = sys.axes[axis].cur_pos;
-                    const int32_t tgt_norm_pos = cur_denorm_pos - cur_norm_pos + txcmd.tgt_pos;
-                    */
-
                     EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
                     EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.tgt_pos);
@@ -929,6 +925,7 @@ private:
     uint32_t                        m_offro_dmd_vel[AXIS_COUNT];
     uint32_t                        m_offro_act_vel[AXIS_COUNT];
     uint32_t                        m_offrw_prof_vel[AXIS_COUNT];
+    uint32_t                        m_offro_abs_pos[AXIS_COUNT];
     uint32_t                        m_offrw_act_mode[AXIS_COUNT];
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
 
