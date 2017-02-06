@@ -686,11 +686,18 @@ private:
         return res_pos_pulse;
     }
 
-    static double pos_pulse2deg(int32_t pos_pulse) {
-        const bool is_pos_positive = (pos_pulse >= 0);
+    static double pos_pulse2deg(int32_t axis, int32_t pos_pulse) {
+        const bool is_pos_negative = (pos_pulse < 0);
         const int32_t local_pos_pulse = pos_pulse % kPulsesPerTurn;
-        const double local_pos_deg = static_cast<double>(local_pos_pulse) / kPulsesPerDegree;
-        return is_pos_positive ? local_pos_deg : static_cast<double>(kDegPerTurn) + local_pos_deg;
+
+        double local_pos_deg = static_cast<double>(local_pos_pulse) / kPulsesPerDegree;
+        if (is_pos_negative) {
+            local_pos_deg += static_cast<double>(kDegPerTurn); // [-360, 0) -> [0, 360)
+        }
+        if (Axis::ELEVATION_AXIS == axis && local_pos_deg > 180.0) {
+            local_pos_deg -= static_cast<double>(kDegPerTurn); // [0, 360) -> [-180,180)
+        }
+        return local_pos_deg;
     }
 
     uint64_t get_app_time() {
@@ -754,9 +761,9 @@ private:
             sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
             sys.axes[axis].dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
 
-            sys.axes[axis].cur_pos_deg = pos_pulse2deg(sys.axes[axis].cur_pos - m_pos_pulse_offset[axis]);
-            sys.axes[axis].tgt_pos_deg = pos_pulse2deg(sys.axes[axis].tgt_pos - m_pos_pulse_offset[axis]);
-            sys.axes[axis].dmd_pos_deg = pos_pulse2deg(sys.axes[axis].dmd_pos - m_pos_pulse_offset[axis]);
+            sys.axes[axis].cur_pos_deg = pos_pulse2deg(axis, sys.axes[axis].cur_pos - m_pos_pulse_offset[axis]);
+            sys.axes[axis].tgt_pos_deg = pos_pulse2deg(axis, sys.axes[axis].tgt_pos - m_pos_pulse_offset[axis]);
+            sys.axes[axis].dmd_pos_deg = pos_pulse2deg(axis, sys.axes[axis].dmd_pos - m_pos_pulse_offset[axis]);
             sys.axes[axis].cur_vel_deg = vel_pulse2deg(sys.axes[axis].cur_vel);
             sys.axes[axis].dmd_vel_deg = vel_pulse2deg(sys.axes[axis].dmd_vel);
 
