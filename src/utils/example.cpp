@@ -25,12 +25,14 @@ struct Command {
     double pos;
     double vel;
     bool idle;
+    bool reset;
 
     Command()
         : axis(Drives::AZIMUTH_AXIS)
         , pos(0.0)
         , vel(0.0)
         , idle(false)
+        , reset(false)
     {}
 
     void clear() {
@@ -38,6 +40,7 @@ struct Command {
         pos = 0.0;
         vel = 0.0;
         idle = false;
+        reset = false;
     }
 };
 
@@ -75,6 +78,8 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             result.pos = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "i") {
             result.idle = true;
+        } else if (cmd_vec[1] == "r") {
+            result.reset = true;
         }
     } else if (cmd_vec[0] == "e") {
         result.axis = Drives::ELEVATION_AXIS;
@@ -99,6 +104,8 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             result.pos = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "i") {
             result.idle = true;
+        } else if (cmd_vec[1] == "r") {
+            result.reset = true;
         }
     } else {
         std::cerr << "Invalid input" << std::endl;
@@ -181,8 +188,9 @@ void print_available_commands() {
     std::cerr << kLevelIndent << "q                 - quit" << std::endl;
     std::cerr << kLevelIndent << "s                 - print system status" << std::endl;
     std::cerr << kLevelIndent << "i                 - print system info" << std::endl;
-    std::cerr << kLevelIndent << "a|e v <vely>      - set (a)zimuth or (e)levation drive to 'scan' mode with <vel> velocity [pulses/sec]" << std::endl;
+    std::cerr << kLevelIndent << "a|e v <vel>       - set (a)zimuth or (e)levation drive to 'scan' mode with <vel> velocity [pulses/sec]" << std::endl;
     std::cerr << kLevelIndent << "a|e p <pos>       - set (a)zimuth or (e)levation drive to 'point' mode with <pos> position [pulses]" << std::endl;
+    std::cerr << kLevelIndent << "a|e r             - reset (a)zimuth or (e)levation drive fault state" << std::endl;
 }
 
 struct StatReader {
@@ -306,11 +314,18 @@ int main(int argc, char* argv[]) {
         // Команда будет передана, только если флаг соответствующий двигателю будет установлен.
         if (cmd.idle) {
             control.SetModeIdle(cmd.axis);
+        } else if (cmd.reset) {
+            control.ResetFault(cmd.axis);
         } else {
             control.SetModeRun(cmd.axis, cmd.pos, cmd.vel);
         }
 
-        std::cerr << "Command axis: " << cmd.axis << " pos: " << cmd.pos << " vel: " << cmd.vel << " idle: " << cmd.idle << std::endl;
+        std::cerr << "Command axis: " << cmd.axis
+                  << " pos: " << cmd.pos
+                  << " vel: " << cmd.vel
+                  << " idle: " << cmd.idle
+                  << " reset: " << cmd.reset
+                  << std::endl;
     }
 
     statreader.stop_ = true;

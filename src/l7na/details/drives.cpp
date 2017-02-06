@@ -80,7 +80,7 @@ AxisStatus::AxisStatus()
 {}
 
 bool AxisStatus::IsReady() const {
-    return state == AxisState::AXIS_IDLE || state == AxisState::AXIS_SCAN || state == AxisState::AXIS_POINT;
+    return state == AxisState::AXIS_IDLE || state == AxisState::AXIS_SCAN || state == AxisState::AXIS_POINT || state == AxisState::AXIS_ERROR;
 }
 
 SystemStatus::SystemStatus()
@@ -220,6 +220,7 @@ protected:
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x260D, 0, &m_offro_abs_pos[ELEVATION_AXIS]},     //!< Actual position (absolute)
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[ELEVATION_AXIS]},    //!< Actual drive mode of operation
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[ELEVATION_AXIS]},    //!< Actual torque
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x603F, 0, &m_offro_err_code[ELEVATION_AXIS]},    //!< Error code
 
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6040, 0, &m_offrw_ctrl[AZIMUTH_AXIS]},          //!< Control word
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6041, 0, &m_offro_status[AZIMUTH_AXIS]},        //!< Status word
@@ -233,6 +234,7 @@ protected:
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x260D, 0, &m_offro_abs_pos[AZIMUTH_AXIS]},       //!< Actual position (absolute)
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_AXIS]},      //!< Actual drive mode of operation
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[AZIMUTH_AXIS]},      //!< Actual torque
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x603F, 0, &m_offro_err_code[AZIMUTH_AXIS]},      //!< Error code
 
                 {}
             };
@@ -380,6 +382,36 @@ protected:
 
         TXCmd txcmd;
         txcmd.ctrlword = 0x6;
+        txcmd.op_mode = OP_MODE_IDLE;
+        txcmd.tgt_vel = 0;
+        txcmd.tgt_pos = 0;
+
+        m_tx_queues[axis].push(txcmd);
+
+        return true;
+    }
+
+    bool ResetFault(const Axis& axis) {
+        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        if (! is_system_ready(s)) {
+            return false;
+        }
+
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        // Set idle mode
+        TXCmd txcmd;
+        txcmd.ctrlword = 0x6;
+        txcmd.op_mode = OP_MODE_IDLE;
+        txcmd.tgt_vel = 0;
+        txcmd.tgt_pos = 0;
+
+        m_tx_queues[axis].push(txcmd);
+
+        // Alarm/error reset
+        txcmd.ctrlword = 0x86;
         txcmd.op_mode = OP_MODE_IDLE;
         txcmd.tgt_vel = 0;
         txcmd.tgt_pos = 0;
@@ -720,14 +752,12 @@ private:
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]);
             sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]);
             sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
-            sys.axes[axis].tgt_vel = EC_READ_S32(m_domain_data + m_offrw_tgt_vel[axis]);
             sys.axes[axis].dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
 
             sys.axes[axis].cur_pos_deg = pos_pulse2deg(sys.axes[axis].cur_pos - m_pos_pulse_offset[axis]);
             sys.axes[axis].tgt_pos_deg = pos_pulse2deg(sys.axes[axis].tgt_pos - m_pos_pulse_offset[axis]);
             sys.axes[axis].dmd_pos_deg = pos_pulse2deg(sys.axes[axis].dmd_pos - m_pos_pulse_offset[axis]);
             sys.axes[axis].cur_vel_deg = vel_pulse2deg(sys.axes[axis].cur_vel);
-            sys.axes[axis].tgt_vel_deg = vel_pulse2deg(sys.axes[axis].tgt_vel);
             sys.axes[axis].dmd_vel_deg = vel_pulse2deg(sys.axes[axis].dmd_vel);
 
             sys.axes[axis].cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
@@ -743,8 +773,10 @@ private:
             } else {
                 sys.axes[axis].state = AxisState::AXIS_ERROR;
             }
-            //! @todo Читать из регистра 0x603F
-            sys.axes[axis].error_code = 0;
+            sys.axes[axis].error_code = EC_READ_U16(m_domain_data + m_offro_err_code[axis]);
+            if (sys.axes[axis].error_code) {
+                sys.axes[axis].state = AxisState::AXIS_ERROR;
+            }
 
             // Читаем данные sdo
             ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis]);
@@ -776,9 +808,12 @@ private:
         sys.exec_max_ns = cycle_info.exec_max_ns.count();
         */
 
-        //! @todo Выставлять исходя из состояний двигателей
-        if (sys.state == SystemState::SYSTEM_OK) {
-            sys.state = SystemState::SYSTEM_OK;
+        if (SystemState::SYSTEM_OK == sys.state) {
+            if (std::any_of(std::begin(sys.axes), std::begin(sys.axes), [](const AxisStatus& axis) {
+                return AxisState::AXIS_ERROR == axis.state;
+            })) {
+                sys.state = SystemState::SYSTEM_ERROR;
+            }
         }
 
         m_sys_status.store(sys, boost::memory_order_relaxed);
@@ -928,6 +963,7 @@ private:
     uint32_t                        m_offro_abs_pos[AXIS_COUNT];
     uint32_t                        m_offrw_act_mode[AXIS_COUNT];
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
+    uint32_t                        m_offro_err_code[AXIS_COUNT];
 
     int32_t                         m_pos_pulse_offset[AXIS_COUNT];
 };
@@ -949,6 +985,10 @@ bool Control::SetModeRun(const Axis& axis, double pos, double vel) {
 
 bool Control::SetModeIdle(const Axis& axis) {
     return m_pimpl->SetModeIdle(axis);
+}
+
+bool Control::ResetFault(const Axis& axis) {
+    return m_pimpl->ResetFault(axis);
 }
 
 const boost::atomic<SystemStatus>& Control::GetStatusRef() const {
