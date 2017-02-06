@@ -657,8 +657,10 @@ private:
     }
 
     static double pos_pulse2deg(int32_t pos_pulse) {
+        const bool is_pos_positive = (pos_pulse >= 0);
         const int32_t local_pos_pulse = pos_pulse % kPulsesPerTurn;
-        return static_cast<double>(local_pos_pulse) / kPulsesPerDegree;
+        const double local_pos_deg = static_cast<double>(local_pos_pulse) / kPulsesPerDegree;
+        return is_pos_positive ? local_pos_deg : static_cast<double>(kDegPerTurn) + local_pos_deg;
     }
 
     uint64_t get_app_time() {
