@@ -1,5 +1,7 @@
 #pragma once
 
+#ifndef L7NA_DISABLE_LOGS
+
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -56,5 +58,16 @@ inline std::basic_istream<TChar, TTraits>& operator>>(std::basic_istream<TChar, 
 
 } // namespaces
 
+#else
 
+#define LOG(messages, level)
+
+#define LOG_TRACE(messages) LOG(messages, trace)
+#define LOG_DEBUG(messages) LOG(messages, debug)
+#define LOG_INFO(messages)  LOG(messages, info)
+#define LOG_WARN(messages)  LOG(messages, warning)
+#define LOG_ERROR(messages) LOG(messages, error)
+#define LOG_FATAL(messages) LOG(messages, fatal)
+
+#endif
 
