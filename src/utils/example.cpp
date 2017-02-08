@@ -165,7 +165,7 @@ void print_status_cerr(const Drives::SystemStatus& status) {
                   << std::endl << "\t"
                   << " cur/dmd_vel_deg         = " << status.axes[axis].cur_vel_deg << "/" << status.axes[axis].dmd_vel_deg
                   << std::endl << "\t"
-                  << " abs/cur/dmd/tgt_pos_raw = " << status.axes[axis].cur_pos_abs << "/"  << status.axes[axis].cur_pos << "/" << status.axes[axis].dmd_pos << "/" << status.axes[axis].tgt_pos
+                  << " abs/cur/dmd/tgt_pos = " << status.axes[axis].cur_pos_abs << "/"  << status.axes[axis].cur_pos << "/" << status.axes[axis].dmd_pos << "/" << status.axes[axis].tgt_pos
                   << std::endl << "\t"
                   << " cur/dmd_vel_raw         = " << status.axes[axis].cur_vel << "/" << status.axes[axis].dmd_vel
                   << std::endl << "\t"
@@ -227,14 +227,17 @@ int main(int argc, char* argv[]) {
     blog::trivial::severity_level loglevel;
     fs::path cfg_file_path, log_file_path;
     uint32_t log_rate_us;
+    int32_t pos_abs_offset_azim, pos_abs_offset_elev;
 
     po::options_description options("options");
     options.add_options()
         ("help,h", "display this message")
-        ("loglevel,l", po::value<boost::log::trivial::severity_level>(&loglevel)->default_value(boost::log::trivial::warning), "global loglevel (trace, debug, info, warning, error or fatal)")
-        ("config,c", po::value<fs::path>(&cfg_file_path)->required(), "path to config file")
-        ("logfile,f", po::value<fs::path>(&log_file_path), "path to output log file. If specified engine real time data will be written to this file")
-        ("lograte,r", po::value<uint32_t>(&log_rate_us), "period in microseconds (us) between samples written to log file. Ignored without 'logfile' option")
+        ("azim_off", po::value<decltype(pos_abs_offset_azim)>(&pos_abs_offset_azim)->default_value(0), "Offset for absolute azimuth position [pulses]")
+        ("elev_off", po::value<decltype(pos_abs_offset_elev)>(&pos_abs_offset_elev)->default_value(0), "Offset for elevation azimuth position [pulses]")
+        ("loglevel,l", po::value<decltype(loglevel)>(&loglevel)->default_value(boost::log::trivial::warning), "global loglevel (trace, debug, info, warning, error or fatal)")
+        ("config,c", po::value<decltype(cfg_file_path)>(&cfg_file_path)->required(), "path to config file")
+        ("logfile,f", po::value<decltype(log_file_path)>(&log_file_path), "path to output log file. If specified engine real time data will be written to this file")
+        ("lograte,r", po::value<decltype(log_rate_us)>(&log_rate_us), "period in microseconds (us) between samples written to log file. Ignored without 'logfile' option")
     ;
 
     po::variables_map vm;
@@ -264,8 +267,8 @@ int main(int argc, char* argv[]) {
     }
 
     Drives::Control control(config);
-    control.SetPositionPulseOffset(Drives::AZIMUTH_AXIS, 0);
-    control.SetPositionPulseOffset(Drives::ELEVATION_AXIS, 85000);
+    control.SetPosAbsPulseOffset(Drives::AZIMUTH_AXIS, pos_abs_offset_azim);
+    control.SetPosAbsPulseOffset(Drives::ELEVATION_AXIS, pos_abs_offset_elev);
 
     const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatusRef();
 

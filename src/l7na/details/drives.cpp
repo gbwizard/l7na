@@ -120,7 +120,8 @@ protected:
         , m_domain(NULL)
         , m_domain_data(NULL)
     {
-        std::memset(m_pos_pulse_offset, 0, AXIS_COUNT * sizeof(int32_t));
+        std::memset(m_pos_abs_usr_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_usr_off[0])));
+        std::memset(m_pos_abs_rel_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_rel_off[0])));
 
         try {
             // Создаем мастер-объект
@@ -217,7 +218,7 @@ protected:
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[ELEVATION_AXIS]},     //!< Demand velocity
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[ELEVATION_AXIS]},     //!< Actual velocity
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[ELEVATION_AXIS]},    //!< Profile velocity
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x260D, 0, &m_offro_abs_pos[ELEVATION_AXIS]},     //!< Actual position (absolute)
+                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x260D, 0, &m_offro_act_pos_abs[ELEVATION_AXIS]}, //!< Actual position (absolute)
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[ELEVATION_AXIS]},    //!< Actual drive mode of operation
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[ELEVATION_AXIS]},    //!< Actual torque
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x603F, 0, &m_offro_err_code[ELEVATION_AXIS]},    //!< Error code
@@ -231,7 +232,7 @@ protected:
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[AZIMUTH_AXIS]},       //!< Demand velocity
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[AZIMUTH_AXIS]},       //!< Actual velocity
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[AZIMUTH_AXIS]},      //!< Profile velocity
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x260D, 0, &m_offro_abs_pos[AZIMUTH_AXIS]},       //!< Actual position (absolute)
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x260D, 0, &m_offro_act_pos_abs[AZIMUTH_AXIS]},   //!< Actual position (absolute)
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_AXIS]},      //!< Actual drive mode of operation
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[AZIMUTH_AXIS]},      //!< Actual torque
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x603F, 0, &m_offro_err_code[AZIMUTH_AXIS]},      //!< Error code
@@ -315,19 +316,19 @@ protected:
 
             // Записываем сотояние системы
             SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
-            s.state = SystemState::SYSTEM_ERROR;
+            s.state = SystemState::SYSTEM_FATAL_ERROR;
             // @todo Возвращать строку ошибки
             // s.error_str = ex.what();
             m_sys_status.store(s);
         }
     }
 
-    bool SetPositionPulseOffset(const Axis& axis, int32_t offset) {
+    bool SetPosAbsPulseOffset(const Axis& axis, int32_t offset) {
         if (! is_axis_valid(axis)) {
             return false;
         }
 
-        m_pos_pulse_offset[axis] = offset;
+        m_pos_abs_usr_off[axis] = offset;
 
         return true;
     }
@@ -350,6 +351,7 @@ protected:
             txcmd.op_mode = OP_MODE_SCAN;
             txcmd.tgt_vel = vel_deg2pulse(vel);
             txcmd.tgt_pos = 0;
+
             m_tx_queues[axis].push(txcmd);
         } else {
             TXCmd txcmd;
@@ -363,7 +365,14 @@ protected:
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x1F;
             txcmd.op_mode = OP_MODE_POINT;
-            txcmd.tgt_pos = pos_deg2pulse(pos, s.axes[axis].cur_pos - m_pos_pulse_offset[axis]) + m_pos_pulse_offset[axis];
+
+            // Current absolute position + user offset [pulses]
+            const int32_t cur_pos_abs_pulse_off = s.axes[axis].cur_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis];
+            // Tategt absolute position + user offset [pulses]
+            const int32_t tgt_pos_abs_pulse_off = pos_deg2pulse(pos, cur_pos_abs_pulse_off);
+            // Target internal position [pulses]
+            txcmd.tgt_pos = tgt_pos_abs_pulse_off + m_pos_abs_rel_off[axis] + m_pos_abs_usr_off[axis];
+
             m_tx_queues[axis].push(txcmd);
         }
 
@@ -755,15 +764,21 @@ private:
             // Читаем данные PDO для двигателя c индексом axis
 
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
-            sys.axes[axis].cur_pos_abs = EC_READ_S32(m_domain_data + m_offro_abs_pos[axis]);
+            sys.axes[axis].cur_pos_abs = EC_READ_S32(m_domain_data + m_offro_act_pos_abs[axis]);
+
+            //! @todo Do it once during prerealtime setup
+            if (! m_pos_abs_rel_off[axis]) {
+                m_pos_abs_rel_off[axis] = sys.axes[axis].cur_pos - sys.axes[axis].cur_pos_abs;
+            }
+
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]);
             sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]);
             sys.axes[axis].cur_vel = EC_READ_S32(m_domain_data + m_offro_act_vel[axis]);
             sys.axes[axis].dmd_vel = EC_READ_S32(m_domain_data + m_offro_dmd_vel[axis]);
 
-            sys.axes[axis].cur_pos_deg = pos_pulse2deg(axis, sys.axes[axis].cur_pos - m_pos_pulse_offset[axis]);
-            sys.axes[axis].tgt_pos_deg = pos_pulse2deg(axis, sys.axes[axis].tgt_pos - m_pos_pulse_offset[axis]);
-            sys.axes[axis].dmd_pos_deg = pos_pulse2deg(axis, sys.axes[axis].dmd_pos - m_pos_pulse_offset[axis]);
+            sys.axes[axis].cur_pos_deg = pos_pulse2deg(axis, sys.axes[axis].cur_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis]);
+            sys.axes[axis].tgt_pos_deg = pos_pulse2deg(axis, sys.axes[axis].tgt_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis]);
+            sys.axes[axis].dmd_pos_deg = pos_pulse2deg(axis, sys.axes[axis].dmd_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis]);
             sys.axes[axis].cur_vel_deg = vel_pulse2deg(sys.axes[axis].cur_vel);
             sys.axes[axis].dmd_vel_deg = vel_pulse2deg(sys.axes[axis].dmd_vel);
 
@@ -967,12 +982,13 @@ private:
     uint32_t                        m_offro_dmd_vel[AXIS_COUNT];
     uint32_t                        m_offro_act_vel[AXIS_COUNT];
     uint32_t                        m_offrw_prof_vel[AXIS_COUNT];
-    uint32_t                        m_offro_abs_pos[AXIS_COUNT];
+    uint32_t                        m_offro_act_pos_abs[AXIS_COUNT];
     uint32_t                        m_offrw_act_mode[AXIS_COUNT];
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
     uint32_t                        m_offro_err_code[AXIS_COUNT];
 
-    int32_t                         m_pos_pulse_offset[AXIS_COUNT];
+    int32_t                         m_pos_abs_usr_off[AXIS_COUNT];
+    int32_t                         m_pos_abs_rel_off[AXIS_COUNT];
 };
 
 Control::Control(const Config::Storage& config)
@@ -982,8 +998,8 @@ Control::Control(const Config::Storage& config)
 Control::~Control() {
 }
 
-bool Control::SetPositionPulseOffset(const Axis& axis, int32_t offset) {
-    return m_pimpl->SetPositionPulseOffset(axis, offset);
+bool Control::SetPosAbsPulseOffset(const Axis& axis, int32_t offset) {
+    return m_pimpl->SetPosAbsPulseOffset(axis, offset);
 }
 
 bool Control::SetModeRun(const Axis& axis, double pos, double vel) {

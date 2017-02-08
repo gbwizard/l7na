@@ -3,7 +3,7 @@ if [ -z $TYPE ]; then
     TYPE=release
 fi
 
-CMD="@BUILD-$TYPE/bin/servoexample -c servo.conf -f output.txt -r 100000"
+CMD="@BUILD-$TYPE/bin/servoexample -c servo.conf --azim_off=209566 --elev_off=38396 -f output.txt -r 100000"
 
 echo "RUN: '$CMD'"
 $CMD
