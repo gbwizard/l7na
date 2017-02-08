@@ -865,19 +865,19 @@ private:
             TXCmd txcmd;
             if (m_tx_queues[axis].pop(txcmd)) {
                 if (txcmd.op_mode == OP_MODE_IDLE) {
-                    EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
+                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
                 } else if (txcmd.op_mode == OP_MODE_POINT) {
-                    EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis], txcmd.tgt_pos);
+                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis],  txcmd.tgt_pos);
                     EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 200000);
 
                     cycles_cmd_start[axis] = cycles_cur;
                 } else if (txcmd.op_mode == OP_MODE_SCAN) {
-                    EC_WRITE_U8(m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis], txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis], txcmd.tgt_vel);
+                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis],  txcmd.tgt_vel);
                 }
             }
         }
