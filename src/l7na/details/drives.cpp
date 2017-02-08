@@ -854,9 +854,13 @@ private:
                         LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
                         cycles_cmd_start[axis] = 0;
                     }
-                } else if (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles) {
-                    // @todo Сообщить об ошибке
-                    continue;
+                } else if ((sys.axes[axis].statusword & 0x8) == 0x8) { // Fault occurred
+                    // Proceed to be able to reset fault
+                } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
+                    // @todo Report error
+                    // Remove all commands from queue
+                    m_tx_queues[axis].consume_all([](const TXCmd&){});
+                    cycles_cmd_start[axis] = 0;
                 } else {
                     continue;
                 }
