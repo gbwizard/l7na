@@ -130,7 +130,7 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
     }
     static uint64_t i = 0;
     // os << i;
-    os << "|" << boost::posix_time::to_simple_string(boost::posix_time::microsec_clock::local_time());
+    os << boost::posix_time::to_simple_string(boost::posix_time::microsec_clock::local_time());
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
          os << "|" << axis << "|" << status.axes[axis].state << "|" << std::hex << "0x" << status.axes[axis].statusword << "|" << status.axes[axis].ctrlword
                   << std::dec << "|" << status.axes[axis].mode
