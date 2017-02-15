@@ -831,7 +831,7 @@ private:
         */
 
         if (SystemState::SYSTEM_OK == sys.state) {
-            if (std::any_of(std::begin(sys.axes), std::begin(sys.axes), [](const AxisStatus& axis) {
+            if (std::any_of(std::begin(sys.axes), std::end(sys.axes), [](const AxisStatus& axis) {
                 return AxisState::AXIS_ERROR == axis.state;
             })) {
                 sys.state = SystemState::SYSTEM_ERROR;
