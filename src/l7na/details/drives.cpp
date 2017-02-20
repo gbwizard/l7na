@@ -478,8 +478,8 @@ protected:
             } else if (cycles_total % 10000 == 0) {
                 //! @todo выход из цикла и сообщение об ошибке
                 LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state
-                         << ", slave0 state=" << slave_cfg_state[0].al_state
-                         << ", slave1 state=" << slave_cfg_state[1].al_state
+                         << ", slave0 state=" << uint32_t(slave_cfg_state[0].al_state)
+                         << ", slave1 state=" << uint32_t(slave_cfg_state[1].al_state)
                          );
             }
 
