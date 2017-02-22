@@ -549,9 +549,9 @@ protected:
             uint32_t lo_ref_time = 0;
             const int err = ecrt_master_reference_clock_time(m_master, &lo_ref_time);
             if (err) {
-                SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
-                s.state = SystemState::SYSTEM_ERROR;
-                m_sys_status.store(s);
+                // SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+                // s.state = SystemState::SYSTEM_ERROR;
+                // m_sys_status.store(s);
                 // @todo save error code
             }
 
