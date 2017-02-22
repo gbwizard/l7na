@@ -367,11 +367,11 @@ protected:
             txcmd.op_mode = OP_MODE_POINT;
 
             // Current absolute position + user offset [pulses]
-            const int32_t cur_pos_abs_pulse_off = s.axes[axis].cur_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis];
-            // Tategt absolute position + user offset [pulses]
-            const int32_t tgt_pos_abs_pulse_off = pos_deg2pulse(pos, cur_pos_abs_pulse_off);
+            const int32_t cur_pos_usr_pulse = s.axes[axis].cur_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis];
+            // Target absolute position + user offset [pulses]
+            const int32_t tgt_pos_usr_pulse = pos_deg2pulse(pos, cur_pos_usr_pulse);
             // Target internal position [pulses]
-            txcmd.tgt_pos = tgt_pos_abs_pulse_off + m_pos_abs_rel_off[axis] + m_pos_abs_usr_off[axis];
+            txcmd.tgt_pos = tgt_pos_usr_pulse + m_pos_abs_rel_off[axis] + m_pos_abs_usr_off[axis];
 
             m_tx_queues[axis].push(txcmd);
         }
@@ -703,7 +703,7 @@ private:
         if (is_pos_negative) {
             local_pos_deg += static_cast<double>(kDegPerTurn); // [-360, 0) -> [0, 360)
         }
-        if (Axis::ELEVATION_AXIS == axis && local_pos_deg > 180.0) {
+        if (Axis::ELEVATION_AXIS == axis && local_pos_deg >= 180.0) {
             local_pos_deg -= static_cast<double>(kDegPerTurn); // [0, 360) -> [-180,180)
         }
         return local_pos_deg;
@@ -767,8 +767,10 @@ private:
             sys.axes[axis].cur_pos_abs = EC_READ_S32(m_domain_data + m_offro_act_pos_abs[axis]);
 
             //! @todo Do it once during prerealtime setup
-            if (! m_pos_abs_rel_off[axis]) {
+            static bool abs_rel_off_initialized[] = {false, false};
+            if (! abs_rel_off_initialized[axis]) {
                 m_pos_abs_rel_off[axis] = sys.axes[axis].cur_pos - sys.axes[axis].cur_pos_abs;
+                abs_rel_off_initialized[axis] = true;
             }
 
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]);
