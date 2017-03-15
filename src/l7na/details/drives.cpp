@@ -356,16 +356,6 @@ protected:
         } else {
             TXCmd txcmd;
 
-            // Переходим в режим "Profile position mode"
-            txcmd.ctrlword = 0xF;
-            txcmd.op_mode = OP_MODE_POINT;
-            txcmd.tgt_pos = 0;
-            m_tx_queues[axis].push(txcmd);
-
-            // Задаем следующую точку для позиционирования
-            txcmd.ctrlword = 0x1F;
-            txcmd.op_mode = OP_MODE_POINT;
-
             // Current absolute position + user offset [pulses]
             const int32_t cur_pos_usr_pulse = s.axes[axis].cur_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis];
             // Target absolute position + user offset [pulses]
@@ -373,6 +363,13 @@ protected:
             // Target internal position [pulses]
             txcmd.tgt_pos = tgt_pos_usr_pulse + m_pos_abs_rel_off[axis] + m_pos_abs_usr_off[axis];
 
+            // Переходим в режим "Profile position mode"
+            txcmd.ctrlword = 0x2F;
+            txcmd.op_mode = OP_MODE_POINT;
+            m_tx_queues[axis].push(txcmd);
+
+            // Задаем следующую точку для позиционирования
+            txcmd.ctrlword = 0x3F;
             m_tx_queues[axis].push(txcmd);
         }
 
@@ -755,6 +752,27 @@ private:
                                       << val << ":" << val_size << ", abort_code=" << abort_code);
             }
         }
+
+        const auto uploadEthercatRegister = [this](uint16_t axis, uint16_t index, uint8_t subindex) -> int32_t {
+            uint32_t abort_code;
+            size_t result_size;
+            int32_t value;
+            const int err = ecrt_master_sdo_upload(m_master, axis, index, subindex, reinterpret_cast<uint8_t*>(&value), sizeof(value), &result_size, &abort_code);
+            if (err) {
+                BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup: failed to upload value for axis=") << axis
+                                      << " index=" << index << "/" << static_cast<uint16_t>(subindex)
+                                      << " abort_code=" << abort_code);
+            }
+
+            return value;
+        };
+
+        // Get absolute-relative position offset for axes
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            const int32_t rel_pos = uploadEthercatRegister(axis, 0x6064, 0);
+            const int32_t abs_pos = uploadEthercatRegister(axis, 0x260D, 0);
+            m_pos_abs_rel_off[axis] = (rel_pos % kPulsesPerTurn) - abs_pos;
+        }
     }
 
     SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& cycle_info) {
@@ -765,13 +783,6 @@ private:
 
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
             sys.axes[axis].cur_pos_abs = EC_READ_S32(m_domain_data + m_offro_act_pos_abs[axis]);
-
-            //! @todo Do it once during prerealtime setup
-            static bool abs_rel_off_initialized[] = {false, false};
-            if (! abs_rel_off_initialized[axis]) {
-                m_pos_abs_rel_off[axis] = sys.axes[axis].cur_pos - sys.axes[axis].cur_pos_abs;
-                abs_rel_off_initialized[axis] = true;
-            }
 
             sys.axes[axis].tgt_pos = EC_READ_S32(m_domain_data + m_offrw_tgt_pos[axis]);
             sys.axes[axis].dmd_pos = EC_READ_S32(m_domain_data + m_offro_dmd_pos[axis]);
