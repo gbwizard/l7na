@@ -150,6 +150,9 @@ read_reg() {
 
 #read_reg INT 0x200E 0 "Position Scale Numerator"
 #read_reg INT 0x200F 0 "Position Scale Denominator"
+read_reg INT  0x210F 0 "Resonance filter use"
+read_reg INT  0x2110 0 "Resonance filter frequency"
+read_reg INT  0x2111 0 "Resonance filter bandwidth"
 read_reg INT  0x6040 0 "Controlword"
 read_reg INT  0x6041 0 "Statusword"
 read_reg INT  0x605A 0 "Quick Stop Option"

@@ -1,5 +1,7 @@
 #include <sys/time.h>
+#include <sys/ioctl.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -18,6 +20,7 @@
 #include <boost/chrono/chrono.hpp>
 
 #include "ecrt.h"
+#include "ioctl.h"
 
 #include "l7na/drives.h"
 #include "l7na/logger.h"
@@ -31,6 +34,8 @@ typedef boost::chrono::system_clock SysClock;
 
 DECLARE_EXCEPTION(Exception, common::Exception);
 DECLARE_EXCEPTION(TestFailedException, common::Exception);
+
+static const char* gkEtherCATDevPath = "/dev/EtherCAT0";
 
 struct CycleTimeInfo {
     SysClock::duration period_ns;
@@ -103,6 +108,11 @@ public:
         if (m_master) {
             ecrt_release_master(m_master);
             LOG_INFO("Master released");
+        }
+
+        if (-1 != m_ethercat_fd) {
+            ::close(m_ethercat_fd);
+            m_ethercat_fd = -1;
         }
     }
 
@@ -305,6 +315,12 @@ protected:
 
             LOG_INFO("Cyclic polling thread started");
 
+            m_ethercat_fd = ::open(gkEtherCATDevPath, O_RDWR);
+            if (-1 == m_ethercat_fd) {
+                BOOST_THROW_EXCEPTION(Exception("Failed to open EtherCAT device for direct control"));
+            }
+            LOG_INFO("EtherCAT device for direct control opened");
+
             // Записываем состояние системы
             SystemStatus s;
             s.state = SystemState::SYSTEM_INIT;
@@ -344,7 +360,8 @@ protected:
         }
 
         if (vel) {
-            TXCmd txcmd;
+            AxisCommand txcmd;
+            txcmd.type = AxisCommand::kSetPDO;
 
             // Переходим в режим "Profile velocity mode" и сразу задаем требуемую скорость
             txcmd.ctrlword = 0xF;
@@ -354,7 +371,8 @@ protected:
 
             m_tx_queues[axis].push(txcmd);
         } else {
-            TXCmd txcmd;
+            AxisCommand txcmd;
+            txcmd.type = AxisCommand::kSetPDO;
 
             // Current absolute position + user offset [pulses]
             const int32_t cur_pos_usr_pulse = s.axes[axis].cur_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis];
@@ -376,6 +394,25 @@ protected:
         return true;
     }
 
+    bool SetModeParams(const Axis& axis, const AxisParams& params) {
+        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        if (! is_system_ready(s)) {
+            return false;
+        }
+
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        AxisCommand txcmd;
+        txcmd.type = AxisCommand::kSetParams;
+        txcmd.params = params;
+
+        m_tx_queues[axis].push(txcmd);
+
+        return true;
+    }
+
     bool SetModeIdle(const Axis& axis) {
         const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
         if (! is_system_ready(s)) {
@@ -386,7 +423,8 @@ protected:
             return false;
         }
 
-        TXCmd txcmd;
+        AxisCommand txcmd;
+        txcmd.type = AxisCommand::kSetPDO;
         txcmd.ctrlword = 0x6;
         txcmd.op_mode = OP_MODE_IDLE;
         txcmd.tgt_vel = 0;
@@ -408,7 +446,8 @@ protected:
         }
 
         // Set idle mode
-        TXCmd txcmd;
+        AxisCommand txcmd;
+        txcmd.type = AxisCommand::kSetPDO;
         txcmd.ctrlword = 0x6;
         txcmd.op_mode = OP_MODE_IDLE;
         txcmd.tgt_vel = 0;
@@ -738,11 +777,11 @@ private:
             const Config::Storage::Key& key_tup = pair_it->first;
             const Config::Storage::Value& val_tup = pair_it->second;
 
-            const uint16_t axis = boost::get<0>(key_tup);
-            const uint16_t index = boost::get<1>(key_tup);
-            const uint8_t subindex = boost::get<2>(key_tup);
-            int32_t val = boost::get<0>(val_tup);
-            const uint8_t val_size = boost::get<1>(val_tup);
+            const uint16_t axis = std::get<0>(key_tup);
+            const uint16_t index = std::get<1>(key_tup);
+            const uint8_t subindex = std::get<2>(key_tup);
+            int32_t val = std::get<0>(val_tup);
+            const uint8_t val_size = std::get<1>(val_tup);
 
             const int result = ecrt_master_sdo_download(m_master, axis, index, subindex, reinterpret_cast<uint8_t*>(&val), val_size, &abort_code);
             if (result) {
@@ -843,12 +882,13 @@ private:
         sys.exec_max_ns = cycle_info.exec_max_ns.count();
         */
 
-        if (SystemState::SYSTEM_OK == sys.state) {
-            if (std::any_of(std::begin(sys.axes), std::end(sys.axes), [](const AxisStatus& axis) {
-                return AxisState::AXIS_ERROR == axis.state;
-            })) {
-                sys.state = SystemState::SYSTEM_ERROR;
-            }
+        const bool any_axis_error = std::any_of(std::begin(sys.axes), std::end(sys.axes), [](const AxisStatus& axis) {
+            return AxisState::AXIS_ERROR == axis.state;
+        });
+        if (! any_axis_error) {
+            sys.state = SystemState::SYSTEM_OK;
+        } else {
+            sys.state = SystemState::SYSTEM_ERROR;
         }
 
         m_sys_status.store(sys, boost::memory_order_relaxed);
@@ -872,29 +912,62 @@ private:
                 } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
                     // @todo Report error
                     // Remove all commands from queue
-                    m_tx_queues[axis].consume_all([](const TXCmd&){});
+                    m_tx_queues[axis].consume_all([](const AxisCommand&){});
                     cycles_cmd_start[axis] = 0;
                 } else {
                     continue;
                 }
             }
 
-            TXCmd txcmd;
+            AxisCommand txcmd;
             if (m_tx_queues[axis].pop(txcmd)) {
-                if (txcmd.op_mode == OP_MODE_IDLE) {
-                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
-                } else if (txcmd.op_mode == OP_MODE_POINT) {
-                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis],  txcmd.tgt_pos);
-                    EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 200000);
+                if (AxisCommand::kSetPDO == txcmd.type) {
+                    if (txcmd.op_mode == OP_MODE_IDLE) {
+                        EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
+                    } else if (txcmd.op_mode == OP_MODE_POINT) {
+                        EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
+                        EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis],  txcmd.tgt_pos);
+                        EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 200000);
 
-                    cycles_cmd_start[axis] = cycles_cur;
-                } else if (txcmd.op_mode == OP_MODE_SCAN) {
-                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis],  txcmd.tgt_vel);
+                        cycles_cmd_start[axis] = cycles_cur;
+                    } else if (txcmd.op_mode == OP_MODE_SCAN) {
+                        EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                        EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
+                        EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis],  txcmd.tgt_vel);
+                    }
+                } else if (AxisCommand::kSetParams == txcmd.type) {
+                    const AxisParams& params = txcmd.params;
+                    std::cerr << "Process SetParams cmd" << std::endl;
+                    for (const AxisParam& p: params) {
+                        ec_ioctl_slave_sdo_download_t data;
+                        data.slave_position = static_cast<decltype(data.slave_position)>(axis);
+                        data.sdo_index = p.index;
+                        data.sdo_entry_subindex = p.subindex;
+                        data.complete_access = false;
+                        int64_t value = p.value;
+                        data.data = reinterpret_cast<uint8_t*>(&value);
+                        data.data_size = p.value_size;
+
+                        if (::ioctl(m_ethercat_fd, EC_IOCTL_SLAVE_SDO_DOWNLOAD, &data) < 0) {
+                            if (errno == EIO && data.abort_code) {
+                                LOG_ERROR("Failed to set axis params:"
+                                    << " axis=" << axis << ", index=" << p.index << ", subindex=" << static_cast<uint16_t>(p.subindex) << ", value=" << p.value << ", abort_code=" << data.abort_code
+                                );
+                            } else {
+                                LOG_ERROR("Failed to set axis params: "
+                                    << "axis=" << axis << ", index=" << p.index << ", subindex=" << static_cast<uint16_t>(p.subindex) << ", value=" << p.value << ", errno=" << errno
+                                );
+                            }
+                        } else {
+                            LOG_DEBUG("Axis params set:"
+                                << " axis=" << axis << ", index=" << p.index << ", subindex=" << static_cast<uint16_t>(p.subindex) << ", value=" << p.value << ", abort_code=" << data.abort_code
+                            );
+                        }
+                    }
+                } else {
+                    assert(false);
                 }
             }
         }
@@ -942,18 +1015,28 @@ private:
         OP_MODE_SCAN = 3
     };
 
-    struct TXCmd {
-        TXCmd()
-            : tgt_pos(0)
+    struct AxisCommand {
+        enum Type {
+            kTypeUnknown,
+            kSetParams,
+            kSetPDO
+        };
+
+        AxisCommand()
+            : type(kTypeUnknown)
+            , tgt_pos(0)
             , tgt_vel(0)
             , ctrlword(0)
             , op_mode(OP_MODE_IDLE)
+            , params()
         {}
 
+        Type type;
         int32_t tgt_pos;
         int32_t tgt_vel;
         uint16_t ctrlword;
         OperationMode op_mode;
+        AxisParams params;
     };
 
     Config::Storage                 m_config;       //!< Конфигурация двигателей, задаваемая пользователем
@@ -977,7 +1060,7 @@ private:
     constexpr static uint32_t           kRegPerDriveCount       = 12;
 
 
-    typedef boost::lockfree::spsc_queue<TXCmd, boost::lockfree::capacity<kCmdQueueCapacity>> TXCmdQueue;
+    typedef boost::lockfree::spsc_queue<AxisCommand, boost::lockfree::capacity<kCmdQueueCapacity>> TXCmdQueue;
     TXCmdQueue                      m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
 
     //! Структуры для обмена данными по EtherCAT
@@ -1006,6 +1089,8 @@ private:
 
     int32_t                         m_pos_abs_usr_off[AXIS_COUNT];
     int32_t                         m_pos_abs_rel_off[AXIS_COUNT];
+
+    int                             m_ethercat_fd = -1;
 };
 
 Control::Control(const Config::Storage& config)
@@ -1021,6 +1106,10 @@ bool Control::SetPosAbsPulseOffset(const Axis& axis, int32_t offset) {
 
 bool Control::SetModeRun(const Axis& axis, double pos, double vel) {
     return m_pimpl->SetModeRun(axis, pos, vel);
+}
+
+bool Control::SetModeParams(const Axis& axis, const AxisParams& params) {
+    return m_pimpl->SetModeParams(axis, params);
 }
 
 bool Control::SetModeIdle(const Axis& axis) {

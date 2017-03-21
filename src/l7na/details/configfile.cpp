@@ -83,7 +83,7 @@ void Storage::ReadFile(const std::string& filepath) {
             const uint16_t key1 = boost::lexical_cast<uint16_t>(key1_str);
             const uint16_t key2 = std::strtoul(key2_str.c_str(), NULL, 16);
             const uint16_t key3 = boost::lexical_cast<uint16_t>(key3_str);
-            key = boost::make_tuple(key1, key2, key3);
+            key = std::make_tuple(key1, key2, key3);
         } catch (const boost::bad_lexical_cast&) {
             BOOST_THROW_EXCEPTION(Exception("Invalid key detected at line number ") << linenum);
         }
@@ -92,7 +92,7 @@ void Storage::ReadFile(const std::string& filepath) {
         try {
             const int64_t val1 = boost::lexical_cast<int64_t>(val1_str);
             const uint8_t val2 = boost::lexical_cast<uint8_t>(val2_str);
-            val = boost::make_tuple(val1, val2);
+            val = std::make_tuple(val1, val2);
         } catch (const boost::bad_lexical_cast&) {
             BOOST_THROW_EXCEPTION(Exception("Invalid value detected at line number ") << linenum);
         }

@@ -147,6 +147,16 @@ struct SystemInfo {
     AxisInfo axes[AXIS_COUNT];
 };
 
+//! @brief Параметры настройки оси
+struct AxisParam {
+    uint16_t index;
+    uint8_t subindex;
+    uint8_t value_size;
+    int64_t value;
+};
+
+using AxisParams = std::vector<AxisParam>;
+
 /*! @brief Объект управления системой вращения.
  *
  *  Созданием объекта == подлключение к системе управления
@@ -158,7 +168,7 @@ public:
      *
      *  @param   cfg_file_path  Путь к файлу с конфигурацией системы (абсолютный или относительно текущей рабочей директории)
      */
-    Control(const Config::Storage& config);
+    Control(const Config::Storage& config = Config::Storage());
 
     /*! @brief Деструктор. Приводит систему управления в первоначальное состояние/выключает систему управления.
      */
@@ -207,6 +217,13 @@ public:
      *  @return                     Флаг успешности операции
      */
     bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/s*/);
+
+    /*! @brief Выставляет параметры оси
+     *
+     * @param axis          Идентификатор двигателя
+     * @param params        Выставляемые параметры двигателя
+     */
+    bool SetModeParams(const Axis& axis, const AxisParams& params);
 
     /*! @brief Переключает систему управления одной оси в режим бездейсвтия.
      *

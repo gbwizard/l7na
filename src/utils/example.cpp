@@ -26,6 +26,7 @@ struct Command {
     double vel;
     bool idle;
     bool reset;
+    bool update_params;
 
     Command()
         : axis(Drives::AZIMUTH_AXIS)
@@ -33,6 +34,7 @@ struct Command {
         , vel(0.0)
         , idle(false)
         , reset(false)
+        , update_params(false)
     {}
 
     void clear() {
@@ -41,6 +43,7 @@ struct Command {
         vel = 0.0;
         idle = false;
         reset = false;
+        update_params = false;
     }
 };
 
@@ -80,6 +83,8 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             result.idle = true;
         } else if (cmd_vec[1] == "r") {
             result.reset = true;
+        } else if (cmd_vec[1] == "u") {
+            result.update_params = true;
         }
     } else if (cmd_vec[0] == "e") {
         result.axis = Drives::ELEVATION_AXIS;
@@ -106,12 +111,13 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             result.idle = true;
         } else if (cmd_vec[1] == "r") {
             result.reset = true;
+        } else if (cmd_vec[1] == "u") {
+            result.update_params = true;
         }
     } else {
         std::cerr << "Invalid input" << std::endl;
         return false;
     }
-
 
     return true;
 }
@@ -319,6 +325,36 @@ int main(int argc, char* argv[]) {
             control.SetModeIdle(cmd.axis);
         } else if (cmd.reset) {
             control.ResetFault(cmd.axis);
+        } else if (cmd.update_params){
+            static int i = 0;
+            std::cerr << "update_params i==" << i << std::endl;
+            const Drives::AxisParams params[2] = {
+                {
+                    {0x2100, 0, 2, 4000},
+                    {0x2106, 0, 2, 200},
+                    {0x2107, 0, 2, 350},
+                    {0x2108, 0, 2, 40},
+                    {0x2109, 0, 2, 25},
+                    {0x6081, 0, 4, 6000},
+                    {0x6082, 0, 4, 3000},
+                    {0x6084, 0, 4, 3000}
+                },
+                {
+                    {0x2100, 0, 2, 1000},
+                    {0x2106, 0, 2, 500},
+                    {0x2107, 0, 2, 800},
+                    {0x2108, 0, 2, 25},
+                    {0x2109, 0, 2, 15},
+                    {0x6081, 0, 4, 20000},
+                    {0x6082, 0, 4, 10000},
+                    {0x6084, 0, 4, 10000}
+                }
+            };
+            if (++i % 2 == 0) {
+                control.SetModeParams(cmd.axis, params[0]);
+            } else {
+                control.SetModeParams(cmd.axis, params[1]);
+            }
         } else {
             control.SetModeRun(cmd.axis, cmd.pos, cmd.vel);
         }
@@ -328,6 +364,7 @@ int main(int argc, char* argv[]) {
                   << " vel: " << cmd.vel
                   << " idle: " << cmd.idle
                   << " reset: " << cmd.reset
+                  << " update_params: " << cmd.update_params
                   << std::endl;
     }
 
