@@ -190,5 +190,5 @@ link_directories(
     ${ETHERCAT_DIR}/lib/.libs
 )
 
-add_subdirectory(externals)
+#add_subdirectory(externals)
 add_subdirectory(src)
