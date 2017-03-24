@@ -720,12 +720,23 @@ private:
 
     bool create_sdo_requests() {
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            // Temperature
             m_temperature_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2610, 0, 16);
             if (! m_temperature_sdo[axis]) {
                 return false;
             }
             // @todo Вынести в настройки
             ecrt_sdo_request_timeout(m_temperature_sdo[axis], 10000 /*ms*/);
+
+            // Test
+            m_test_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2100, 0, 16);
+            m_test2_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2105, 0, 16);
+            if (! m_test_sdo[axis] || ! m_test2_sdo[axis]) {
+                return false;
+            }
+            // @todo Вынести в настройки
+            // ecrt_sdo_request_timeout(m_test_sdo[axis], 10000 /*ms*/);
+            // ecrt_sdo_request_timeout(m_test2_sdo[axis], 10000 /*ms*/);
         }
 
         return true;
@@ -777,10 +788,10 @@ private:
 
     SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& cycle_info) {
         SystemStatus sys = m_sys_status.load(boost::memory_order_acquire);
+        static int axis_allowed = 0;
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Читаем данные PDO для двигателя c индексом axis
-
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
             sys.axes[axis].cur_pos_abs = EC_READ_S32(m_domain_data + m_offro_act_pos_abs[axis]);
 
@@ -815,15 +826,84 @@ private:
 
             // Читаем данные sdo
             ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis]);
-            if (sdo_req_state == EC_REQUEST_SUCCESS) {
+            if (axis == axis_allowed && sdo_req_state == EC_REQUEST_SUCCESS) {
                 sys.axes[axis].cur_temperature = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis]));
                 // @todo Вынести в настройки
-                if (cycle_num %= 10000) {
+                if (cycle_num % 10000 == 0) {
                     ecrt_sdo_request_read(m_temperature_sdo[axis]);
                 }
-            } else if (sdo_req_state == EC_REQUEST_UNUSED) {
+            } else if (axis == axis_allowed && sdo_req_state == EC_REQUEST_UNUSED) {
                 ecrt_sdo_request_read(m_temperature_sdo[axis]);
             }
+
+            // Test
+            sdo_req_state = ecrt_sdo_request_state(m_test_sdo[axis]);
+            if (axis == axis_allowed && sdo_req_state == EC_REQUEST_SUCCESS) {
+                LOG_INFO("test sdo SUCCESS axis=" << axis);
+            }
+            if (axis == axis_allowed && (sdo_req_state == EC_REQUEST_SUCCESS || sdo_req_state == EC_REQUEST_UNUSED)) {
+                // @todo Вынести в настройки
+                //if (cycle_num % 2000 == 0) {
+                    EC_WRITE_U16(ecrt_sdo_request_data(m_test_sdo[axis]), 1000 + axis);
+                    ecrt_sdo_request_write(m_test_sdo[axis]);
+                    axis_allowed = 1 - axis_allowed;
+
+                    static int i[2] = {0};
+                    // ++i[axis];
+                    if (i[axis] % 10 == 0) {
+                        LOG_INFO("test sdo written axis=" << axis);
+                    }
+                //}
+            }/* else if (sdo_req_state == EC_REQUEST_SUCCESS) {
+                static int i[2] = {0};
+                if (i[axis] % 1000000 == 0) {
+                    LOG_INFO("test sdo state success! axis=" << axis);
+                }
+                ++i[axis];
+            } */else if (sdo_req_state == EC_REQUEST_ERROR) {
+                LOG_ERROR("test sdo_req_state=error, axis=" << axis);
+            } /*else if (sdo_req_state == EC_REQUEST_BUSY) {
+                static int i[2] = {0};
+                ++i[axis];
+                if (i[axis] % 2000 == 0) {
+                    LOG_ERROR("test busy 2000 times axis=" << axis);
+                }
+            }*/
+
+//            // Test2
+//            sdo_req_state = ecrt_sdo_request_state(m_test2_sdo[axis]);
+//            if (axis == axis_allowed && sdo_req_state == EC_REQUEST_SUCCESS) {
+//                LOG_INFO("test2 sdo SUCCESS axis=" << axis);
+//            }
+
+//            if (axis == axis_allowed && (sdo_req_state == EC_REQUEST_SUCCESS || sdo_req_state == EC_REQUEST_UNUSED)) {
+//                // @todo Вынести в настройки
+//                //if (cycle_num % 2000 == 0) {
+//                    EC_WRITE_U16(ecrt_sdo_request_data(m_test2_sdo[axis]), 200 + axis);
+//                    ecrt_sdo_request_write(m_test2_sdo[axis]);
+//                    axis_allowed = 1 - axis_allowed;
+
+//                    static int i[2] = {0};
+//                    // ++i[axis];
+//                    if (i[axis] % 10 == 0) {
+//                        LOG_INFO("test2 sdo written axis=" << axis);
+//                    }
+//                //}
+//            }/* else if (sdo_req_state == EC_REQUEST_SUCCESS) {
+//                static int i[2] = {0};
+//                if (i[axis] % 1000000 == 0) {
+//                    LOG_INFO("test2 sdo state success! axis=" << axis);
+//                }
+//                ++i[axis];
+//            } */else if (sdo_req_state == EC_REQUEST_ERROR) {
+//                LOG_ERROR("test2 sdo_req_state=error, axis=" << axis);
+//            } /*else if (sdo_req_state == EC_REQUEST_BUSY) {
+//                static int i[2] = {0};
+//                ++i[axis];
+//                if (i[axis] % 2000 == 0) {
+//                    LOG_ERROR("test2 busy 2000 times axis=" << axis);
+//                }
+//            }*/
         }
 
         sys.reftime = reftime + kEpoch112000DiffNs;
@@ -989,6 +1069,8 @@ private:
     ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
 
     ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT];
+    ec_sdo_request_t*               m_test_sdo[AXIS_COUNT];
+    ec_sdo_request_t*               m_test2_sdo[AXIS_COUNT];
 
     uint32_t                        m_offrw_ctrl[AXIS_COUNT];
     uint32_t                        m_offro_status[AXIS_COUNT];
