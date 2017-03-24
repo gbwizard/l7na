@@ -6,7 +6,9 @@
 #include <type_traits>
 
 #include <boost/lexical_cast.hpp>
-#include <boost/functional/hash.hpp>
+#include <boost/tuple/tuple.hpp>
+#include <boost/unordered_map.hpp>
+#include <boost/unordered_set.hpp>
 
 #include "exceptions.h"
 
@@ -20,9 +22,9 @@ DECLARE_EXCEPTION(Exception, common::Exception);
 class Storage {
 public:
     // 1st - axis, 2nd - index, 3rd - sub index
-    typedef std::tuple<uint16_t, uint16_t, uint8_t> Key;
+    typedef boost::tuple<uint16_t, uint16_t, uint8_t> Key;
     // 1st - value, 2nd - value byte size
-    typedef std::tuple<int64_t, uint8_t> Value;
+    typedef boost::tuple<int64_t, uint8_t> Value;
 
     struct KeyHash
         : public std::unary_function<KeyHash, std::size_t>
@@ -30,9 +32,9 @@ public:
         std::size_t operator()(const Key& k) const {
             std::size_t seed = 0;
 
-            boost::hash_combine(seed, std::get<0>(k));
-            boost::hash_combine(seed, std::get<1>(k));
-            boost::hash_combine(seed, std::get<2>(k));
+            boost::hash_combine(seed, boost::get<0>(k));
+            boost::hash_combine(seed, boost::get<1>(k));
+            boost::hash_combine(seed, boost::get<2>(k));
 
             return seed;
         }
@@ -40,13 +42,13 @@ public:
 
     struct KeyComp {
         bool operator()(const Key& k1, const Key& k2) const {
-            return (std::get<0>(k1) == std::get<0>(k2))
-                    && (std::get<1>(k1) == std::get<1>(k2))
-                    && (std::get<2>(k1) == std::get<2>(k2));
+            return (boost::get<0>(k1) == boost::get<0>(k2))
+                    && (boost::get<1>(k1) == boost::get<1>(k2))
+                    && (boost::get<2>(k1) == boost::get<2>(k2));
         }
     };
 
-    typedef std::unordered_map<Key, Value, KeyHash, KeyComp> KeyValueDict;
+    typedef boost::unordered_map<Key, Value, KeyHash, KeyComp> KeyValueDict;
 
     Storage();
 
@@ -73,8 +75,6 @@ public:
      * \throw ConfigException
      */
     void ReadFile(const std::string& filepath);
-
-    void AddKeyValue(const Key& k, const Value& v);
 
     bool IsEmpty() const;
 
