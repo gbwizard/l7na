@@ -26,6 +26,8 @@ struct Command {
     double vel;
     bool idle;
     bool reset;
+    bool update_params;
+    Drives::AxisParams params;
 
     Command()
         : axis(Drives::AZIMUTH_AXIS)
@@ -33,6 +35,8 @@ struct Command {
         , vel(0.0)
         , idle(false)
         , reset(false)
+        , update_params(false)
+        , params()
     {}
 
     void clear() {
@@ -41,6 +45,8 @@ struct Command {
         vel = 0.0;
         idle = false;
         reset = false;
+        update_params = false;
+        params.clear();
     }
 };
 
@@ -76,6 +82,27 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             }
 
             result.pos = std::atof(cmd_vec[2].c_str());
+        } else if (cmd_vec[1] == "u") {
+            if (cmd_vec.size() < 4 || cmd_vec.size() % 2 != 0) {
+                std::cerr << "Invalid input for command 'a u'" << std::endl;
+                return false;
+            }
+
+            uint16_t idx;
+            int64_t val;
+            size_t arg_idx = 2;
+            while (arg_idx < cmd_vec.size()) {
+                try {
+                    idx = std::stoi(cmd_vec[arg_idx++], NULL, 16);
+                    val = std::stoi(cmd_vec[arg_idx++]);
+                } catch (const std::exception& ex) {
+                    std::cerr << "Can't convert input for 'a u':" << ex.what() << std::endl;
+                    return false;
+                }
+                result.params.push_back({idx, val});
+            }
+
+            result.update_params = true;
         } else if (cmd_vec[1] == "i") {
             result.idle = true;
         } else if (cmd_vec[1] == "r") {
@@ -95,6 +122,27 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             }
 
             result.vel = std::atof(cmd_vec[2].c_str());
+        } else if (cmd_vec[1] == "u") {
+            if (cmd_vec.size() < 4 || cmd_vec.size() % 2 != 0) {
+                std::cerr << "Invalid input for command 'e u'" << std::endl;
+                return false;
+            }
+
+            uint16_t idx;
+            int64_t val;
+            size_t arg_idx = 2;
+            while (arg_idx < cmd_vec.size()) {
+                try {
+                    idx = std::stoi(cmd_vec[arg_idx++], NULL, 16);
+                    val = std::stoi(cmd_vec[arg_idx++]);
+                } catch (const std::exception& ex) {
+                    std::cerr << "Can't convert input for 'e u':" << ex.what() << std::endl;
+                    return false;
+                }
+                result.params.push_back({idx, val});
+            }
+
+            result.update_params = true;
         } else if (cmd_vec[1] == "p") {
             if (cmd_vec.size() < 3) {
                 std::cerr << "Invalid input for command 'e p'" << std::endl;
@@ -144,18 +192,8 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
 
 void print_status_cerr(const Drives::SystemStatus& status) {
     std::cerr << "System > state: " << status.state << " dcsync: " << status.dcsync << std::endl;
-//    std::cerr << "    prevapptime               : " << status.prev_apptime << std::hex << " = 0x" << status.prev_apptime << std::dec << std::endl;
     std::cerr << "    apptime                   : " << status.apptime << std::hex << " = 0x" << status.apptime << std::dec << std::endl;
     std::cerr << "    reftime                   : " << status.reftime << std::hex << " = 0x" << status.reftime << std::dec << std::endl;
-//    std::cerr << "    cycle_latency_ns          : " << status.latency_ns << std::endl;
-//    std::cerr << "    cycle_latency_min_ns      : " << status.latency_min_ns << std::endl;
-//    std::cerr << "    cycle_latency_max_ns      : " << status.latency_max_ns << std::endl;
-//    std::cerr << "    cycle_period_ns           : " << status.period_ns << std::endl;
-//    std::cerr << "    cycle_period_min_ns       : " << status.period_min_ns << std::endl;
-//    std::cerr << "    cycle_period_max_ns       : " << status.period_max_ns << std::endl;
-//    std::cerr << "    cycle_exec_ns             : " << status.exec_ns << std::endl;
-//    std::cerr << "    cycle_exec_min_ns         : " << status.exec_min_ns << std::endl;
-//    std::cerr << "    cycle_exec_max_ns         : " << status.exec_max_ns << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
         std::cerr << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
@@ -191,6 +229,7 @@ void print_available_commands() {
     std::cerr << kLevelIndent << "a|e v <vel>       - set (a)zimuth or (e)levation drive to 'scan' mode with <vel> velocity [pulses/sec]" << std::endl;
     std::cerr << kLevelIndent << "a|e p <pos>       - set (a)zimuth or (e)levation drive to 'point' mode with <pos> position [pulses]" << std::endl;
     std::cerr << kLevelIndent << "a|e r             - reset (a)zimuth or (e)levation drive fault state" << std::endl;
+    std::cerr << kLevelIndent << "a|e u <idx> <val> - set (a)zimuth or (e)levation drive parameter" << std::endl;
 }
 
 struct StatReader {
@@ -319,6 +358,8 @@ int main(int argc, char* argv[]) {
             control.SetModeIdle(cmd.axis);
         } else if (cmd.reset) {
             control.ResetFault(cmd.axis);
+        } else if (cmd.update_params) {
+            control.SetModeParams(cmd.axis, cmd.params);
         } else {
             control.SetModeRun(cmd.axis, cmd.pos, cmd.vel);
         }
@@ -328,6 +369,7 @@ int main(int argc, char* argv[]) {
                   << " vel: " << cmd.vel
                   << " idle: " << cmd.idle
                   << " reset: " << cmd.reset
+                  << " update_params: " << cmd.update_params
                   << std::endl;
     }
 
