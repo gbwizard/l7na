@@ -175,7 +175,7 @@ protected:
             };
 
             ec_pdo_info_t l7na_tx_pdos[] = {
-                {0x1A00, 10, l7na_tx_channel}
+                {0x1A00, sizeof(l7na_tx_channel)/sizeof(l7na_tx_channel[0]), l7na_tx_channel}
             };
 
             // RxPDO
@@ -184,11 +184,10 @@ protected:
                 {0x6060, 0, 8},     // Actual mode of operation
                 {0x607A, 0, 32},    // Target position
                 {0x60FF, 0, 32},    // Target velocity
-                {0x6081, 0, 32},    // Profile velocity
             };
 
             ec_pdo_info_t l7na_rx_pdos[] = {
-                {0x1600, 5, l7na_rx_channel}
+                {0x1600, sizeof(l7na_rx_channel)/sizeof(l7na_rx_channel[0]), l7na_rx_channel}
             };
 
             // Конфигурация SyncManagers 2 (FMMU0) и 3 (FMMU1)
@@ -218,7 +217,6 @@ protected:
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[ELEVATION_AXIS]},     //!< Target velocity
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[ELEVATION_AXIS]},     //!< Demand velocity
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[ELEVATION_AXIS]},     //!< Actual velocity
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[ELEVATION_AXIS]},    //!< Profile velocity
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x260D, 0, &m_offro_act_pos_abs[ELEVATION_AXIS]}, //!< Actual position (absolute)
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[ELEVATION_AXIS]},    //!< Actual drive mode of operation
                 {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[ELEVATION_AXIS]},    //!< Actual torque
@@ -232,7 +230,6 @@ protected:
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[AZIMUTH_AXIS]},       //!< Target velocity
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[AZIMUTH_AXIS]},       //!< Demand velocity
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[AZIMUTH_AXIS]},       //!< Actual velocity
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6081, 0, &m_offrw_prof_vel[AZIMUTH_AXIS]},      //!< Profile velocity
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x260D, 0, &m_offro_act_pos_abs[AZIMUTH_AXIS]},   //!< Actual position (absolute)
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_AXIS]},      //!< Actual drive mode of operation
                 {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[AZIMUTH_AXIS]},      //!< Actual torque
@@ -910,7 +907,6 @@ private:
                     EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
                     EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis],  txcmd.tgt_pos);
-                    EC_WRITE_U32(m_domain_data + m_offrw_prof_vel[axis], 200000);
 
                     cycles_cmd_start[axis] = cycles_cur;
                 } else if (txcmd.op_mode == OP_MODE_SCAN) {
@@ -930,43 +926,35 @@ private:
                     const uint16_t value_size = kWriteSdoIndices.at(txcmd.param.index);
 
                     //! @todo Infinite loop if state is BUSY all the time
-                    if (EC_REQUEST_BUSY != sdo_state) {
-                        if (1 == value_size) {
-                            EC_WRITE_S8(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
-                        } else if (2 == value_size) {
-                            EC_WRITE_S16(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
-                        } else if (4 == value_size) {
-                            EC_WRITE_S32(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
-                        } else {
-                            assert(false);
-                        }
-
-                        // Ставим в очередь запрос на запись SDO
-                        ecrt_sdo_request_write(sdo_req);
-
-                        // Удаляем команду из очереди
-                        m_tx_queues[axis].pop();
-
-                        if(! m_tx_queues[axis].size()) {
-                            break;
-                        }
-
-                        // Если следующая команда установка параметра, пытаемся ее обработать
-                        txcmd = m_tx_queues[axis].front();
-                        if (TXCmd::kSetSDO != txcmd.type) {
-                            break;
-                        }
-                    } else {
+                    if (EC_REQUEST_BUSY == sdo_state) {
                         break;
                     }
 
+                    if (1 == value_size) {
+                        EC_WRITE_S8(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                    } else if (2 == value_size) {
+                        EC_WRITE_S16(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                    } else if (4 == value_size) {
+                        EC_WRITE_S32(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                    } else {
+                        assert(false);
+                    }
+
+                    // Ставим в очередь запрос на запись SDO
                     ecrt_sdo_request_write(sdo_req);
 
                     // Удаляем команду из очереди
                     m_tx_queues[axis].pop();
 
-                    // Выходим из цикла обработки осей, чтобы не писать информацию по другим осям
-                    break;
+                    if(! m_tx_queues[axis].size()) {
+                        break;
+                    }
+
+                    // Если следующая команда установка параметра, пытаемся ее обработать
+                    txcmd = m_tx_queues[axis].front();
+                    if (TXCmd::kSetSDO != txcmd.type) {
+                        break;
+                    }
                 }
 
                 // Выходим из цикла обработки осей, чтобы не писать информацию по другим осям в этом цикле
@@ -1107,7 +1095,6 @@ private:
     uint32_t                        m_offrw_tgt_vel[AXIS_COUNT];
     uint32_t                        m_offro_dmd_vel[AXIS_COUNT];
     uint32_t                        m_offro_act_vel[AXIS_COUNT];
-    uint32_t                        m_offrw_prof_vel[AXIS_COUNT];
     uint32_t                        m_offro_act_pos_abs[AXIS_COUNT];
     uint32_t                        m_offrw_act_mode[AXIS_COUNT];
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
