@@ -112,16 +112,6 @@ struct SystemStatus {
     uint64_t reftime;               //!< Время привязки координат в системном времени [наносекунды с начала Epoch]
     uint64_t apptime;               //!< Текущее системное время [наносекунды с начала Epoch]
     uint32_t dcsync;                //!< Оценка сверху разницы во времени между хостом и двигателем [наносекунды]
-
-//    uint32_t latency_ns;
-//    uint32_t latency_min_ns;
-//    uint32_t latency_max_ns;
-//    uint32_t period_ns;
-//    uint32_t period_min_ns;
-//    uint32_t period_max_ns;
-//    uint32_t exec_ns;
-//    uint32_t exec_min_ns;
-//    uint32_t exec_max_ns;
 };
 
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
@@ -146,6 +136,14 @@ struct SystemInfo {
 
     AxisInfo axes[AXIS_COUNT];
 };
+
+//! @brief Параметры настройки оси
+struct AxisParam {
+    uint16_t index;
+    int64_t value;
+};
+
+using AxisParams = std::vector<AxisParam>;
 
 /*! @brief Объект управления системой вращения.
  *
@@ -207,6 +205,13 @@ public:
      *  @return                     Флаг успешности операции
      */
     bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/s*/);
+
+    /*! @brief Выставляет параметры оси
+     *
+     * @param axis          Идентификатор двигателя
+     * @param params        Выставляемые параметры двигателя
+     */
+    bool SetModeParams(const Axis& axis, const AxisParams& params);
 
     /*! @brief Переключает систему управления одной оси в режим бездейсвтия.
      *

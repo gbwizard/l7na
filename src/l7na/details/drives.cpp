@@ -347,6 +347,7 @@ protected:
             TXCmd txcmd;
 
             // Переходим в режим "Profile velocity mode" и сразу задаем требуемую скорость
+            txcmd.type = TXCmd::kSetPDO;
             txcmd.ctrlword = 0xF;
             txcmd.op_mode = OP_MODE_SCAN;
             txcmd.tgt_vel = vel_deg2pulse(vel);
@@ -364,12 +365,37 @@ protected:
             txcmd.tgt_pos = tgt_pos_usr_pulse + m_pos_abs_rel_off[axis] + m_pos_abs_usr_off[axis];
 
             // Переходим в режим "Profile position mode"
+            txcmd.type = TXCmd::kSetPDO;
             txcmd.ctrlword = 0x2F;
             txcmd.op_mode = OP_MODE_POINT;
             m_tx_queues[axis].push(txcmd);
 
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x3F;
+            m_tx_queues[axis].push(txcmd);
+        }
+
+        return true;
+    }
+
+    bool SetModeParams(const Axis& axis, const AxisParams& params) {
+        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        if (! is_system_ready(s)) {
+            return false;
+        }
+
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        if (! check_axis_params(params)) {
+            return false;
+        }
+
+        TXCmd txcmd;
+        txcmd.type = TXCmd::kSetSDO;
+        for (const AxisParam& p: params) {
+            txcmd.param = p;
             m_tx_queues[axis].push(txcmd);
         }
 
@@ -387,6 +413,7 @@ protected:
         }
 
         TXCmd txcmd;
+        txcmd.type = TXCmd::kSetPDO;
         txcmd.ctrlword = 0x6;
         txcmd.op_mode = OP_MODE_IDLE;
         txcmd.tgt_vel = 0;
@@ -409,6 +436,7 @@ protected:
 
         // Set idle mode
         TXCmd txcmd;
+        txcmd.type = TXCmd::kSetPDO;
         txcmd.ctrlword = 0x6;
         txcmd.op_mode = OP_MODE_IDLE;
         txcmd.tgt_vel = 0;
@@ -505,33 +533,7 @@ protected:
         while (! m_stop_flag.load(boost::memory_order_consume)) {
             wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
             boost::this_thread::sleep_until(wakeup_time);
-/*
-            // Cycle time info gathering
-            start_time = SysClock::now();
-            cycle_info.latency_ns = start_time - wakeup_time;
-            cycle_info.period_ns = start_time - last_start_time;
-            cycle_info.exec_ns = end_time - last_start_time;
-            last_start_time = start_time;
 
-            if (cycle_info.latency_ns > cycle_info.latency_max_ns) {
-                cycle_info.latency_max_ns = cycle_info.latency_ns;
-            }
-            if (cycle_info.latency_ns < cycle_info.latency_min_ns) {
-                cycle_info.latency_min_ns = cycle_info.latency_ns;
-            }
-            if (cycle_info.period_ns > cycle_info.period_max_ns) {
-                cycle_info.period_max_ns = cycle_info.period_ns;
-            }
-            if (cycle_info.period_ns < cycle_info.period_min_ns) {
-                cycle_info.period_min_ns = cycle_info.period_ns;
-            }
-            if (cycle_info.exec_ns > cycle_info.exec_max_ns) {
-                cycle_info.exec_max_ns = cycle_info.exec_ns;
-            }
-            if (cycle_info.exec_ns < cycle_info.exec_min_ns) {
-                cycle_info.exec_min_ns = cycle_info.exec_ns;
-            }
-*/
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
             ecrt_domain_process(m_domain);
@@ -721,22 +723,30 @@ private:
     bool create_sdo_requests() {
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Temperature
-            m_temperature_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2610, 0, 16);
+            m_temperature_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2610, 0, 2);
             if (! m_temperature_sdo[axis]) {
                 return false;
             }
             // @todo Вынести в настройки
             ecrt_sdo_request_timeout(m_temperature_sdo[axis], 10000 /*ms*/);
 
-            // Test
-            m_test_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2100, 0, 16);
-            m_test2_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2105, 0, 16);
-            if (! m_test_sdo[axis] || ! m_test2_sdo[axis]) {
-                return false;
+            // Sdos for download
+            std::map<uint16_t, ec_sdo_request_t*>& axis_write_sdos = m_write_sdos[axis];
+            for (const std::pair<uint16_t, uint16_t> sdo_info: kWriteSdoIndices) {
+                const uint16_t& sdo_idx = sdo_info.first;
+                const uint16_t& sdo_data_size = sdo_info.second;
+                ec_sdo_request* sdo_req = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], sdo_idx, 0, sdo_data_size);
+                if (! sdo_req) {
+                    LOG_ERROR("Failed to create sdo idx=" << sdo_idx);
+                    return false;
+                }
+
+                assert(axis_write_sdos.end() == axis_write_sdos.find(sdo_idx));
+
+                axis_write_sdos[sdo_idx] = sdo_req;
+                // @todo Вынести в настройки
+                ecrt_sdo_request_timeout(sdo_req, 10000 /*ms*/);
             }
-            // @todo Вынести в настройки
-            // ecrt_sdo_request_timeout(m_test_sdo[axis], 10000 /*ms*/);
-            // ecrt_sdo_request_timeout(m_test2_sdo[axis], 10000 /*ms*/);
         }
 
         return true;
@@ -786,7 +796,7 @@ private:
         }
     }
 
-    SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& cycle_info) {
+    SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& /*cycle_info*/) {
         SystemStatus sys = m_sys_status.load(boost::memory_order_acquire);
         static int axis_allowed = 0;
 
@@ -835,100 +845,19 @@ private:
             } else if (axis == axis_allowed && sdo_req_state == EC_REQUEST_UNUSED) {
                 ecrt_sdo_request_read(m_temperature_sdo[axis]);
             }
-
-            // Test
-            sdo_req_state = ecrt_sdo_request_state(m_test_sdo[axis]);
-            if (axis == axis_allowed && sdo_req_state == EC_REQUEST_SUCCESS) {
-                LOG_INFO("test sdo SUCCESS axis=" << axis);
-            }
-            if (axis == axis_allowed && (sdo_req_state == EC_REQUEST_SUCCESS || sdo_req_state == EC_REQUEST_UNUSED)) {
-                // @todo Вынести в настройки
-                //if (cycle_num % 2000 == 0) {
-                    EC_WRITE_U16(ecrt_sdo_request_data(m_test_sdo[axis]), 1000 + axis);
-                    ecrt_sdo_request_write(m_test_sdo[axis]);
-                    axis_allowed = 1 - axis_allowed;
-
-                    static int i[2] = {0};
-                    // ++i[axis];
-                    if (i[axis] % 10 == 0) {
-                        LOG_INFO("test sdo written axis=" << axis);
-                    }
-                //}
-            }/* else if (sdo_req_state == EC_REQUEST_SUCCESS) {
-                static int i[2] = {0};
-                if (i[axis] % 1000000 == 0) {
-                    LOG_INFO("test sdo state success! axis=" << axis);
-                }
-                ++i[axis];
-            } */else if (sdo_req_state == EC_REQUEST_ERROR) {
-                LOG_ERROR("test sdo_req_state=error, axis=" << axis);
-            } /*else if (sdo_req_state == EC_REQUEST_BUSY) {
-                static int i[2] = {0};
-                ++i[axis];
-                if (i[axis] % 2000 == 0) {
-                    LOG_ERROR("test busy 2000 times axis=" << axis);
-                }
-            }*/
-
-//            // Test2
-//            sdo_req_state = ecrt_sdo_request_state(m_test2_sdo[axis]);
-//            if (axis == axis_allowed && sdo_req_state == EC_REQUEST_SUCCESS) {
-//                LOG_INFO("test2 sdo SUCCESS axis=" << axis);
-//            }
-
-//            if (axis == axis_allowed && (sdo_req_state == EC_REQUEST_SUCCESS || sdo_req_state == EC_REQUEST_UNUSED)) {
-//                // @todo Вынести в настройки
-//                //if (cycle_num % 2000 == 0) {
-//                    EC_WRITE_U16(ecrt_sdo_request_data(m_test2_sdo[axis]), 200 + axis);
-//                    ecrt_sdo_request_write(m_test2_sdo[axis]);
-//                    axis_allowed = 1 - axis_allowed;
-
-//                    static int i[2] = {0};
-//                    // ++i[axis];
-//                    if (i[axis] % 10 == 0) {
-//                        LOG_INFO("test2 sdo written axis=" << axis);
-//                    }
-//                //}
-//            }/* else if (sdo_req_state == EC_REQUEST_SUCCESS) {
-//                static int i[2] = {0};
-//                if (i[axis] % 1000000 == 0) {
-//                    LOG_INFO("test2 sdo state success! axis=" << axis);
-//                }
-//                ++i[axis];
-//            } */else if (sdo_req_state == EC_REQUEST_ERROR) {
-//                LOG_ERROR("test2 sdo_req_state=error, axis=" << axis);
-//            } /*else if (sdo_req_state == EC_REQUEST_BUSY) {
-//                static int i[2] = {0};
-//                ++i[axis];
-//                if (i[axis] % 2000 == 0) {
-//                    LOG_ERROR("test2 busy 2000 times axis=" << axis);
-//                }
-//            }*/
         }
 
         sys.reftime = reftime + kEpoch112000DiffNs;
         sys.apptime = apptime + kEpoch112000DiffNs;
         sys.dcsync = dcsync;
 
-        // @todo Слишком часто
-        /*
-        sys.latency_ns = cycle_info.latency_ns.count();
-        sys.latency_min_ns = cycle_info.latency_min_ns.count();
-        sys.latency_max_ns = cycle_info.latency_max_ns.count();
-        sys.period_ns = cycle_info.period_ns.count();
-        sys.period_min_ns = cycle_info.period_min_ns.count();
-        sys.period_max_ns = cycle_info.period_max_ns.count();
-        sys.exec_ns = cycle_info.exec_ns.count();
-        sys.exec_min_ns = cycle_info.exec_min_ns.count();
-        sys.exec_max_ns = cycle_info.exec_max_ns.count();
-        */
-
-        if (SystemState::SYSTEM_OK == sys.state) {
-            if (std::any_of(std::begin(sys.axes), std::end(sys.axes), [](const AxisStatus& axis) {
-                return AxisState::AXIS_ERROR == axis.state;
-            })) {
-                sys.state = SystemState::SYSTEM_ERROR;
-            }
+        const bool any_axis_error = std::any_of(std::begin(sys.axes), std::end(sys.axes), [](const AxisStatus& axis) {
+            return AxisState::AXIS_ERROR == axis.state;
+        });
+        if (! any_axis_error) {
+            sys.state = SystemState::SYSTEM_OK;
+        } else {
+            sys.state = SystemState::SYSTEM_ERROR;
         }
 
         m_sys_status.store(sys, boost::memory_order_relaxed);
@@ -959,8 +888,11 @@ private:
                 }
             }
 
-            TXCmd txcmd;
-            if (m_tx_queues[axis].pop(txcmd)) {
+            if(! m_tx_queues[axis].read_available()) {
+                continue;
+            }
+            TXCmd txcmd = m_tx_queues[axis].front();
+            if (TXCmd::kSetPDO == txcmd.type) {
                 if (txcmd.op_mode == OP_MODE_IDLE) {
                     EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
@@ -976,10 +908,51 @@ private:
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
                     EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis],  txcmd.tgt_vel);
                 }
+                // Удаляем команду из очереди
+                m_tx_queues[axis].pop();
+            } else if (TXCmd::kSetSDO == txcmd.type) {
+                std::map<uint16_t, ec_sdo_request*>& axis_write_sdos = m_write_sdos[axis];
+
+                // Такой индекс точно должен быть в мапе, мы ранее это проверяли
+                ec_sdo_request* sdo_req = axis_write_sdos.at(txcmd.param.index);
+                const ec_request_state_t sdo_state = ecrt_sdo_request_state(sdo_req);
+                const uint16_t value_size = kWriteSdoIndices.at(txcmd.param.index);
+                if (EC_REQUEST_BUSY != sdo_state) {
+                    if (1 == value_size) {
+                        EC_WRITE_S8(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                    } else if (2 == value_size) {
+                        EC_WRITE_S16(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                    } else if (4 == value_size) {
+                        EC_WRITE_S32(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                    } else {
+                        assert(false);
+                    }
+
+                    ecrt_sdo_request_write(sdo_req);
+
+                    // Удаляем команду из очереди
+                    m_tx_queues[axis].pop();
+
+                    // Выходим из цикла обработки осей, чтобы не писать информацию по другим осям
+                    break;
+                }
+            } else {
+                assert(false);
             }
         }
 
         ++cycles_cur;
+    }
+
+    bool check_axis_params(const AxisParams& params) {
+        for (const AxisParam& p: params) {
+            if (kWriteSdoIndices.find(p.index) == kWriteSdoIndices.end()) {
+                LOG_ERROR("Writing sdo index=" << p.index << " is not supported");
+                return false;
+            }
+        }
+
+        return true;
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1023,17 +996,26 @@ private:
     };
 
     struct TXCmd {
+        enum Type : int8_t {
+            kTypeUnknown = -1,
+            kSetSDO,
+            kSetPDO
+        };
+
         TXCmd()
             : tgt_pos(0)
             , tgt_vel(0)
             , ctrlword(0)
             , op_mode(OP_MODE_IDLE)
+            , type(kTypeUnknown)
         {}
 
         int32_t tgt_pos;
         int32_t tgt_vel;
         uint16_t ctrlword;
         OperationMode op_mode;
+        Type type;
+        AxisParam param;
     };
 
     Config::Storage                 m_config;       //!< Конфигурация двигателей, задаваемая пользователем
@@ -1069,8 +1051,19 @@ private:
     ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
 
     ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT];
-    ec_sdo_request_t*               m_test_sdo[AXIS_COUNT];
-    ec_sdo_request_t*               m_test2_sdo[AXIS_COUNT];
+
+    /* SDO index -> SDO data size */
+    const std::map<uint16_t, uint16_t> kWriteSdoIndices = {
+        { 0x2100, 2 }
+        , { 0x2106, 2 }
+        , { 0x2107, 2 }
+        , { 0x2108, 2 }
+        , { 0x2109, 2 }
+        , { 0x6081, 4 }
+        , { 0x6083, 4 }
+        , { 0x6084, 4 }
+    };
+    std::map<uint16_t, ec_sdo_request_t*> m_write_sdos[AXIS_COUNT];
 
     uint32_t                        m_offrw_ctrl[AXIS_COUNT];
     uint32_t                        m_offro_status[AXIS_COUNT];
@@ -1103,6 +1096,10 @@ bool Control::SetPosAbsPulseOffset(const Axis& axis, int32_t offset) {
 
 bool Control::SetModeRun(const Axis& axis, double pos, double vel) {
     return m_pimpl->SetModeRun(axis, pos, vel);
+}
+
+bool Control::SetModeParams(const Axis& axis, const AxisParams& params) {
+    return m_pimpl->SetModeParams(axis, params);
 }
 
 bool Control::SetModeIdle(const Axis& axis) {
