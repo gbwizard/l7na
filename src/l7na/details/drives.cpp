@@ -5,13 +5,14 @@
 #include <cstdlib>
 #include <cmath>
 #include <thread>
+#include <mutex>
 #include <chrono>
 #include <functional>
 #include <algorithm>
 #include <map>
+#include <queue>
 
 #include <boost/filesystem/path.hpp>
-#include <boost/lockfree/spsc_queue.hpp>
 #include <boost/atomic/atomic.hpp>
 #include <boost/memory_order.hpp>
 #include <boost/thread/thread.hpp>
@@ -353,6 +354,7 @@ protected:
             txcmd.tgt_vel = vel_deg2pulse(vel);
             txcmd.tgt_pos = 0;
 
+            std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
             m_tx_queues[axis].push(txcmd);
         } else {
             TXCmd txcmd;
@@ -368,6 +370,8 @@ protected:
             txcmd.type = TXCmd::kSetPDO;
             txcmd.ctrlword = 0x2F;
             txcmd.op_mode = OP_MODE_POINT;
+
+            std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
             m_tx_queues[axis].push(txcmd);
 
             // Задаем следующую точку для позиционирования
@@ -394,6 +398,8 @@ protected:
 
         TXCmd txcmd;
         txcmd.type = TXCmd::kSetSDO;
+
+        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
         for (const AxisParam& p: params) {
             txcmd.param = p;
             m_tx_queues[axis].push(txcmd);
@@ -419,6 +425,7 @@ protected:
         txcmd.tgt_vel = 0;
         txcmd.tgt_pos = 0;
 
+        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
         m_tx_queues[axis].push(txcmd);
 
         return true;
@@ -442,6 +449,7 @@ protected:
         txcmd.tgt_vel = 0;
         txcmd.tgt_pos = 0;
 
+        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
         m_tx_queues[axis].push(txcmd);
 
         // Alarm/error reset
@@ -869,6 +877,7 @@ private:
         static uint64_t cycles_cur = 0;                         // Номер текущего цикла в рамках работы
         static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};     // Номер цикла начала ожидания исполнения команды
 
+        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             if (sys.axes[axis].mode == OP_MODE_POINT) {
                 if ((sys.axes[axis].statusword & 0x7) == 0x7) {
@@ -881,14 +890,15 @@ private:
                 } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
                     // @todo Report error
                     // Remove all commands from queue
-                    m_tx_queues[axis].consume_all([](const TXCmd&){});
+                    std::queue<TXCmd> dummy;
+                    m_tx_queues[axis].swap(dummy);
                     cycles_cmd_start[axis] = 0;
                 } else {
                     continue;
                 }
             }
 
-            if(! m_tx_queues[axis].read_available()) {
+            if(! m_tx_queues[axis].size()) {
                 continue;
             }
             TXCmd txcmd = m_tx_queues[axis].front();
@@ -913,19 +923,41 @@ private:
             } else if (TXCmd::kSetSDO == txcmd.type) {
                 std::map<uint16_t, ec_sdo_request*>& axis_write_sdos = m_write_sdos[axis];
 
-                // Такой индекс точно должен быть в мапе, мы ранее это проверяли
-                ec_sdo_request* sdo_req = axis_write_sdos.at(txcmd.param.index);
-                const ec_request_state_t sdo_state = ecrt_sdo_request_state(sdo_req);
-                const uint16_t value_size = kWriteSdoIndices.at(txcmd.param.index);
-                if (EC_REQUEST_BUSY != sdo_state) {
-                    if (1 == value_size) {
-                        EC_WRITE_S8(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
-                    } else if (2 == value_size) {
-                        EC_WRITE_S16(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
-                    } else if (4 == value_size) {
-                        EC_WRITE_S32(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                while(true) {
+                    // Такой индекс точно должен быть в мапе, мы ранее это проверяли
+                    ec_sdo_request* sdo_req = axis_write_sdos.at(txcmd.param.index);
+                    const ec_request_state_t sdo_state = ecrt_sdo_request_state(sdo_req);
+                    const uint16_t value_size = kWriteSdoIndices.at(txcmd.param.index);
+
+                    //! @todo Infinite loop if state is BUSY all the time
+                    if (EC_REQUEST_BUSY != sdo_state) {
+                        if (1 == value_size) {
+                            EC_WRITE_S8(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                        } else if (2 == value_size) {
+                            EC_WRITE_S16(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                        } else if (4 == value_size) {
+                            EC_WRITE_S32(ecrt_sdo_request_data(sdo_req), txcmd.param.value);
+                        } else {
+                            assert(false);
+                        }
+
+                        // Ставим в очередь запрос на запись SDO
+                        ecrt_sdo_request_write(sdo_req);
+
+                        // Удаляем команду из очереди
+                        m_tx_queues[axis].pop();
+
+                        if(! m_tx_queues[axis].size()) {
+                            break;
+                        }
+
+                        // Если следующая команда установка параметра, пытаемся ее обработать
+                        txcmd = m_tx_queues[axis].front();
+                        if (TXCmd::kSetSDO != txcmd.type) {
+                            break;
+                        }
                     } else {
-                        assert(false);
+                        break;
                     }
 
                     ecrt_sdo_request_write(sdo_req);
@@ -936,6 +968,9 @@ private:
                     // Выходим из цикла обработки осей, чтобы не писать информацию по другим осям
                     break;
                 }
+
+                // Выходим из цикла обработки осей, чтобы не писать информацию по другим осям в этом цикле
+                break;
             } else {
                 assert(false);
             }
@@ -947,7 +982,7 @@ private:
     bool check_axis_params(const AxisParams& params) {
         for (const AxisParam& p: params) {
             if (kWriteSdoIndices.find(p.index) == kWriteSdoIndices.end()) {
-                LOG_ERROR("Writing sdo index=" << p.index << " is not supported");
+                LOG_ERROR("Writing sdo index=" << std::hex << "0x" << p.index << " is not supported");
                 return false;
             }
         }
@@ -1028,19 +1063,18 @@ private:
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
 
 
-    constexpr static uint64_t           kMaxAxisReadyCycles     = 8192;
-    constexpr static uint64_t           kMaxDomainInitCycles    = 8192;
-    constexpr static int32_t            kPulsesPerTurn          = 1048576; // 2^20
-    constexpr static int32_t            kDegPerTurn             = 360;
-    constexpr static double             kPulsesPerDegree        = 1048576.0 / 360.0;
-    constexpr static uint64_t           kEpoch112000DiffNs      = 946684800000000000ULL;
-    constexpr static uint32_t           kCmdQueueCapacity       = 128;
-    constexpr static uint32_t           kCyclePeriodNs          = 1000000;
-    constexpr static uint32_t           kRegPerDriveCount       = 12;
+    constexpr static uint64_t       kMaxAxisReadyCycles     = 8192;
+    constexpr static uint64_t       kMaxDomainInitCycles    = 8192;
+    constexpr static int32_t        kPulsesPerTurn          = 1048576; // 2^20
+    constexpr static int32_t        kDegPerTurn             = 360;
+    constexpr static double         kPulsesPerDegree        = 1048576.0 / 360.0;
+    constexpr static uint64_t       kEpoch112000DiffNs      = 946684800000000000ULL;
+    constexpr static uint32_t       kCmdQueueCapacity       = 128;
+    constexpr static uint32_t       kCyclePeriodNs          = 1000000;
+    constexpr static uint32_t       kRegPerDriveCount       = 12;
 
-
-    typedef boost::lockfree::spsc_queue<TXCmd, boost::lockfree::capacity<kCmdQueueCapacity>> TXCmdQueue;
-    TXCmdQueue                      m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
+    std::mutex                      m_tx_queues_mutex;
+    std::queue<TXCmd>               m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
 
     //! Структуры для обмена данными по EtherCAT
     ec_master_t*                    m_master;
