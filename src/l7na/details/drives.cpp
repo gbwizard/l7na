@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <map>
 #include <queue>
+#include <list>
 
 #include <boost/filesystem/path.hpp>
 #include <boost/atomic/atomic.hpp>
@@ -23,6 +24,13 @@
 #include "l7na/drives.h"
 #include "l7na/logger.h"
 #include "l7na/exceptions.h"
+
+/*! @todo
+ *  1. Failed to get reference clock time
+ *  2. Контролировать выставление параметров оси.
+ *  3. Приоритет команды SetModeIdle
+ *  4. Controlword/Statusword - pretty print.
+ */
 
 namespace Drives {
 
@@ -110,7 +118,7 @@ public:
 protected:
     friend class Control;
 
-    Impl(const Config::Storage& config)
+    Impl(const Config::Storage& config, const ParamsMode params_mode)
         : m_config(config)
         , m_sdo_cfg()
         , m_sys_info{}
@@ -123,6 +131,11 @@ protected:
     {
         std::memset(m_pos_abs_usr_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_usr_off[0])));
         std::memset(m_pos_abs_rel_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_rel_off[0])));
+
+        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
+            m_params_mode[axis] = params_mode;
+            m_cur_move_mode[axis] = kMoveModeInvalid;
+        }
 
         try {
             // Создаем мастер-объект
@@ -341,30 +354,65 @@ protected:
             return false;
         }
 
+        std::list<TXCmd> txcmd_list;
+        MoveMode& axis_cur_move_mode = m_cur_move_mode[axis];
+        const MoveModeMap& axis_move_modes = m_move_modes[axis];
+        const ParamsMode& axis_params_mode = m_params_mode[axis];
+
         if (vel) {
-            TXCmd txcmd;
+            /* Устанавливаем параметры для движения на постоянной скорости.
+             * Для этого выбираем режим с максимальным значением.
+             */
+            if (PARAMS_MODE_AUTOMATIC == axis_params_mode
+                    && ! axis_move_modes.empty()
+                    && axis_cur_move_mode != axis_move_modes.rbegin()->first) {
+                const AxisParams& params = axis_move_modes.rbegin()->second;
+                TXCmd txcmd(TXCmd::kSetParams);
+                for (const AxisParam& p: params) {
+                    txcmd.param = p;
+                    txcmd_list.push_back(txcmd);
+                }
+
+                axis_cur_move_mode = axis_move_modes.rbegin()->first;
+            }
+
+            TXCmd txcmd(TXCmd::kCmd);
 
             // Переходим в режим "Profile velocity mode" и сразу задаем требуемую скорость
-            txcmd.type = TXCmd::kSetPDO;
             txcmd.ctrlword = 0xF;
             txcmd.op_mode = OP_MODE_SCAN;
             txcmd.tgt_vel = vel_deg2pulse(vel);
             txcmd.tgt_pos = 0;
 
-            std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
-            m_tx_queues[axis].push(txcmd);
+            txcmd_list.push_back(txcmd);
         } else {
-            TXCmd txcmd;
-
             // Current absolute position + user offset [pulses]
             const int32_t cur_pos_usr_pulse = s.axes[axis].cur_pos - m_pos_abs_rel_off[axis] - m_pos_abs_usr_off[axis];
             // Target absolute position + user offset [pulses]
             const int32_t tgt_pos_usr_pulse = pos_deg2pulse(pos, cur_pos_usr_pulse);
             // Target internal position [pulses]
-            txcmd.tgt_pos = tgt_pos_usr_pulse + m_pos_abs_rel_off[axis] + m_pos_abs_usr_off[axis];
+            const int32_t tgt_pos = tgt_pos_usr_pulse + m_pos_abs_rel_off[axis] + m_pos_abs_usr_off[axis];
+            const int32_t pos_diff_pulse = std::abs(tgt_pos - s.axes[axis].cur_pos);
+            const double pos_diff_deg = pos_diff_pulse / kPulsesPerDegree;
+
+            // Устанавливаем параметры для движения к указанной точке.
+            if (PARAMS_MODE_AUTOMATIC == axis_params_mode) {
+                const MoveMode move_mode = get_move_mode(axis, pos_diff_deg);
+                if (move_mode != kMoveModeInvalid && axis_cur_move_mode != move_mode) {
+                    const AxisParams& params = axis_move_modes.at(move_mode);
+                    TXCmd txcmd(TXCmd::kSetParams);
+                    for (const AxisParam& p: params) {
+                        txcmd.param = p;
+                        txcmd_list.push_back(txcmd);
+                    }
+                    axis_cur_move_mode = move_mode;
+                }
+            }
+
+            TXCmd txcmd(TXCmd::kCmd);
+            txcmd.tgt_pos = tgt_pos;
 
             // Переходим в режим "Profile position mode"
-            txcmd.type = TXCmd::kSetPDO;
             txcmd.ctrlword = 0x2F;
             txcmd.op_mode = OP_MODE_POINT;
 
@@ -376,10 +424,28 @@ protected:
             m_tx_queues[axis].push(txcmd);
         }
 
+        // Перемещаем содержимое списка команд в очередь под локом
+        {
+            std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
+            for (TXCmd& cmd: txcmd_list) {
+                m_tx_queues[axis].push(std::move(cmd));
+            }
+        }
+
         return true;
     }
 
-    bool SetModeParams(const Axis& axis, const AxisParams& params) {
+    bool AddMoveMode(const Axis& axis, const MoveMode& mode, const AxisParams& params) {
+        m_move_modes[axis][mode] = params;
+        return true;
+    }
+
+    bool SetParamsMode(const Axis& axis, const ParamsMode& params_mode) {
+        m_params_mode[axis] = params_mode;
+        return true;
+    }
+
+    bool SetAxisParams(const Axis& axis, const AxisParams& params) {
         const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
         if (! is_system_ready(s)) {
             return false;
@@ -389,12 +455,16 @@ protected:
             return false;
         }
 
+        if (m_params_mode[axis] != PARAMS_MODE_AUTOMATIC) {
+            LOG_WARN("SetAxisParams(axis=" << axis << ") failed: 'Automatic' params mode is engaged");
+            return false;
+        }
+
         if (! check_axis_params(params)) {
             return false;
         }
 
-        TXCmd txcmd;
-        txcmd.type = TXCmd::kSetSDO;
+        TXCmd txcmd(TXCmd::kSetParams);
 
         std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
         for (const AxisParam& p: params) {
@@ -415,8 +485,7 @@ protected:
             return false;
         }
 
-        TXCmd txcmd;
-        txcmd.type = TXCmd::kSetPDO;
+        TXCmd txcmd(TXCmd::kCmd);
         txcmd.ctrlword = 0x6;
         txcmd.op_mode = OP_MODE_IDLE;
         txcmd.tgt_vel = 0;
@@ -439,8 +508,7 @@ protected:
         }
 
         // Set idle mode
-        TXCmd txcmd;
-        txcmd.type = TXCmd::kSetPDO;
+        TXCmd txcmd(TXCmd::kCmd);
         txcmd.ctrlword = 0x6;
         txcmd.op_mode = OP_MODE_IDLE;
         txcmd.tgt_vel = 0;
@@ -898,8 +966,9 @@ private:
             if(! m_tx_queues[axis].size()) {
                 continue;
             }
+
             TXCmd txcmd = m_tx_queues[axis].front();
-            if (TXCmd::kSetPDO == txcmd.type) {
+            if (TXCmd::kCmd == txcmd.type) {
                 if (txcmd.op_mode == OP_MODE_IDLE) {
                     EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
                     EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
@@ -916,9 +985,12 @@ private:
                 }
                 // Удаляем команду из очереди
                 m_tx_queues[axis].pop();
-            } else if (TXCmd::kSetSDO == txcmd.type) {
+            } else if (TXCmd::kSetParams == txcmd.type) {
+                bool axis_params_set = false;
                 std::map<uint16_t, ec_sdo_request*>& axis_write_sdos = m_write_sdos[axis];
 
+                //! @todo Контролировать выставление параметров осей
+                //! @todo Транзакционность выставления параметров осей
                 while(true) {
                     // Такой индекс точно должен быть в мапе, мы ранее это проверяли
                     ec_sdo_request* sdo_req = axis_write_sdos.at(txcmd.param.index);
@@ -943,6 +1015,9 @@ private:
                     // Ставим в очередь запрос на запись SDO
                     ecrt_sdo_request_write(sdo_req);
 
+                    // Устанавливаем флаг произошедшей записи
+                    axis_params_set = true;
+
                     // Удаляем команду из очереди
                     m_tx_queues[axis].pop();
 
@@ -950,15 +1025,18 @@ private:
                         break;
                     }
 
-                    // Если следующая команда установка параметра, пытаемся ее обработать
+                    // Если следующая команда - установка параметра оси, то пытаемся ее обработать
                     txcmd = m_tx_queues[axis].front();
-                    if (TXCmd::kSetSDO != txcmd.type) {
+                    if (TXCmd::kSetParams != txcmd.type) {
                         break;
                     }
                 }
 
-                // Выходим из цикла обработки осей, чтобы не писать информацию по другим осям в этом цикле
-                break;
+                // Выходим из цикла обработки осей, в случае, если мы записали хотя бы один параметр для оси,
+                // чтобы не писать информацию по другим осям в этом цикле
+                if (axis_params_set) {
+                    break;
+                }
             } else {
                 assert(false);
             }
@@ -977,6 +1055,22 @@ private:
 
         return true;
     }
+
+    MoveMode get_move_mode(const Axis& axis, const double pos_diff_deg) {
+        MoveMode result = kMoveModeInvalid;
+        for (const auto& mm_pair: m_move_modes[axis]) {
+            const double mm_val = static_cast<double>(mm_pair.first);
+            if (pos_diff_deg < mm_val) {
+                result = mm_pair.first;
+            } else {
+                break;
+            }
+
+        }
+
+        return result;
+    }
+
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // TESTS
@@ -1010,6 +1104,7 @@ private:
         checker(pos_deg2pulse(50, -7400000), -7194397, "CurPosPulse<0,TgtPosPulse<CurPosPulse,Tgt2Cur>=HalfTurn");
         checker(pos_deg2pulse(300, -7400000), -7514795, "CurPosPulse<0,TgtPosPulse<CurPosPulse,Tgt2Cur<HalfTurn");
     }
+
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     enum OperationMode : uint8_t {
@@ -1021,16 +1116,16 @@ private:
     struct TXCmd {
         enum Type : int8_t {
             kTypeUnknown = -1,
-            kSetSDO,
-            kSetPDO
+            kSetParams,
+            kCmd
         };
 
-        TXCmd()
+        explicit TXCmd(const Type& t = kTypeUnknown)
             : tgt_pos(0)
             , tgt_vel(0)
             , ctrlword(0)
             , op_mode(OP_MODE_IDLE)
-            , type(kTypeUnknown)
+            , type(t)
         {}
 
         int32_t tgt_pos;
@@ -1060,6 +1155,7 @@ private:
     constexpr static uint32_t       kCmdQueueCapacity       = 128;
     constexpr static uint32_t       kCyclePeriodNs          = 1000000;
     constexpr static uint32_t       kRegPerDriveCount       = 12;
+    constexpr static MoveMode       kMoveModeInvalid        = -1;
 
     std::mutex                      m_tx_queues_mutex;
     std::queue<TXCmd>               m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
@@ -1085,8 +1181,16 @@ private:
         , { 0x6083, 4 }
         , { 0x6084, 4 }
     };
-    std::map<uint16_t, ec_sdo_request_t*> m_write_sdos[AXIS_COUNT];
+    using SdoReqMap = std::map<uint16_t, ec_sdo_request_t*>;
+    SdoReqMap                       m_write_sdos[AXIS_COUNT];
 
+    ParamsMode                      m_params_mode[AXIS_COUNT];
+
+    using MoveModeMap = std::map<MoveMode, AxisParams>;
+    MoveModeMap                     m_move_modes[AXIS_COUNT];
+    MoveMode                        m_cur_move_mode[AXIS_COUNT];
+
+    //! Смещения в данных домена для параметров управления осями.
     uint32_t                        m_offrw_ctrl[AXIS_COUNT];
     uint32_t                        m_offro_status[AXIS_COUNT];
     uint32_t                        m_offrw_tgt_pos[AXIS_COUNT];
@@ -1100,12 +1204,13 @@ private:
     uint32_t                        m_offro_act_torq[AXIS_COUNT];
     uint32_t                        m_offro_err_code[AXIS_COUNT];
 
+    //! Пользовательские смещения коордиант [pulses] относительно абсолютных систем координат осей
     int32_t                         m_pos_abs_usr_off[AXIS_COUNT];
     int32_t                         m_pos_abs_rel_off[AXIS_COUNT];
 };
 
-Control::Control(const Config::Storage& config)
-    : m_pimpl(new Control::Impl(config))
+Control::Control(const Config::Storage& config, const ParamsMode params_mode /*= PARAMS_MODE_AUTOMATIC*/)
+    : m_pimpl(new Control::Impl(config, params_mode))
 {}
 
 Control::~Control() {
@@ -1119,8 +1224,16 @@ bool Control::SetModeRun(const Axis& axis, double pos, double vel) {
     return m_pimpl->SetModeRun(axis, pos, vel);
 }
 
-bool Control::SetModeParams(const Axis& axis, const AxisParams& params) {
-    return m_pimpl->SetModeParams(axis, params);
+bool Control::AddMoveMode(const Axis& axis, const MoveMode& mode, const AxisParams& params) {
+    return m_pimpl->AddMoveMode(axis, mode, params);
+}
+
+bool Control::SetParamsMode(const Axis& axis, const ParamsMode& params_mode) {
+    return m_pimpl->SetParamsMode(axis, params_mode);
+}
+
+bool Control::SetAxisParams(const Axis& axis, const AxisParams& params) {
+    return m_pimpl->SetAxisParams(axis, params);
 }
 
 bool Control::SetModeIdle(const Axis& axis) {

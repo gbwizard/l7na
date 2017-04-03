@@ -359,7 +359,7 @@ int main(int argc, char* argv[]) {
         } else if (cmd.reset) {
             control.ResetFault(cmd.axis);
         } else if (cmd.update_params) {
-            control.SetModeParams(cmd.axis, cmd.params);
+            control.SetAxisParams(cmd.axis, cmd.params);
         } else {
             control.SetModeRun(cmd.axis, cmd.pos, cmd.vel);
         }

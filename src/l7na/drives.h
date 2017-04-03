@@ -67,6 +67,19 @@ enum AxisState : int32_t {
     AXIS_ERROR                      //!< Состояние ошибки
 };
 
+//! @brief Режим установки параметров осей
+enum ParamsMode : int16_t {
+    PARAMS_MODE_AUTOMATIC,
+    PARAMS_MODE_MANUAL
+};
+
+/*! @brief Режим движения, соответствующий определенному набору параметров оси.
+ *
+ *  Cоответствует максимальному расстоянию в градусах между текущей и запрашиваемой позицией.
+ *  Для режима AXIS_SCAN используется режим с максимальным идентификатором.
+ */
+using MoveMode = uint16_t;
+
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
     AxisStatus();
@@ -156,7 +169,7 @@ public:
      *
      *  @param   cfg_file_path  Путь к файлу с конфигурацией системы (абсолютный или относительно текущей рабочей директории)
      */
-    Control(const Config::Storage& config);
+    Control(const Config::Storage& config, const ParamsMode params_mode = PARAMS_MODE_AUTOMATIC);
 
     /*! @brief Деструктор. Приводит систему управления в первоначальное состояние/выключает систему управления.
      */
@@ -206,12 +219,29 @@ public:
      */
     bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/s*/);
 
+    /*! @brief Добавляем в систему новый режим работы по параметрам.
+     *
+     * @param axis          Идентификатор двигателя
+     * @param mode          Идентификатор режима работы, соответствует максимальному расстоянию в градусах
+     *                      между текущей и запрашиваемой позицией.
+     *                      Для режима AXIS_SCAN используется режим с максимальным идентификатором.
+     * @param params        Выставляемые параметры двигателя
+     */
+    bool AddMoveMode(const Axis& axis, const MoveMode& mode, const AxisParams& params);
+
+    /*! @brief Задает режим выставления параметров двигателя ()
+     *
+     * @param axis          Идентификатор двигателя
+     * @param params_mode   Режим выставления параметров двигателя
+     */
+    bool SetParamsMode(const Axis& axis, const ParamsMode& params_mode);
+
     /*! @brief Выставляет параметры оси
      *
      * @param axis          Идентификатор двигателя
      * @param params        Выставляемые параметры двигателя
      */
-    bool SetModeParams(const Axis& axis, const AxisParams& params);
+    bool SetAxisParams(const Axis& axis, const AxisParams& params);
 
     /*! @brief Переключает систему управления одной оси в режим бездейсвтия.
      *
