@@ -23,6 +23,8 @@
 #include "l7na/drives.h"
 #include "l7na/logger.h"
 #include "l7na/exceptions.h"
+#include "types_int.h"
+#include "axisparams.h"
 
 /*! @todo
  *  1. Failed to get reference clock time
@@ -30,54 +32,6 @@
  *  3. Приоритет команды SetModeIdle
  *  4. Controlword/Statusword - pretty print.
  */
-
-namespace {
-
-static const Drives::AxisParams kAzimParams_180_Mode = {
-    { 0x2100, 800},
-    { 0x2101, 1},
-    { 0x2102, 1},
-    { 0x2103, 0},
-    { 0x2104, 0},
-    { 0x2105, 0},
-    { 0x2106, 550},
-    { 0x2107, 850},
-    { 0x2108, 25},
-    { 0x2109, 15},
-    { 0x210A, 0},
-    { 0x210B, 1},
-    { 0x2301, 25},
-    { 0x2302, 15},
-    { 0x2303, 0},
-    { 0x2304, 1},
-    { 0x6081, 200000},
-    { 0x6083, 50000},
-    { 0x6084, 50000}
-};
-
-static const Drives::AxisParams kElevParams_180_Mode = {
-    { 0x2100, 2000},
-    { 0x2101, 1},
-    { 0x2102, 1},
-    { 0x2103, 0},
-    { 0x2104, 98},
-    { 0x2105, 0},
-    { 0x2106, 100},
-    { 0x2107, 150},
-    { 0x2108, 1},
-    { 0x2109, 1},
-    { 0x210A, 0},
-    { 0x210B, 0},
-    { 0x2301, 1},
-    { 0x2302, 1},
-    { 0x2303, 10},
-    { 0x2304, 0},
-    { 0x6081, 200000},
-    { 0x6083, 100000},
-    { 0x6084, 100000}
-};
-
-} // namespace
 
 namespace Drives {
 
@@ -176,8 +130,8 @@ protected:
         , m_domain(NULL)
         , m_domain_data(NULL)
     {
-        m_move_modes[AZIMUTH_AXIS].insert({180, kAzimParams_180_Mode});
-        m_move_modes[ELEVATION_AXIS].insert({180, kElevParams_180_Mode});
+        m_move_modes[AZIMUTH_AXIS] = kAzimAutoMoveModeMap;
+        m_move_modes[ELEVATION_AXIS] = kElevAutoMoveModeMap;
 
         std::memset(m_pos_abs_usr_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_usr_off[0])));
         std::memset(m_pos_abs_rel_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_rel_off[0])));
@@ -406,6 +360,7 @@ protected:
 
         std::list<TXCmd> txcmd_list;
         MoveMode& axis_cur_move_mode = m_cur_move_mode[axis];
+        const MoveMode axis_old_move_mode = m_cur_move_mode[axis];
         const MoveModeMap& axis_move_modes = m_move_modes[axis];
         const ParamsMode& axis_params_mode = m_params_mode[axis];
 
@@ -466,19 +421,24 @@ protected:
             txcmd.ctrlword = 0x2F;
             txcmd.op_mode = OP_MODE_POINT;
 
-            std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
-            m_tx_queues[axis].push_back(txcmd);
+            txcmd_list.push_back(txcmd);
 
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x3F;
-            m_tx_queues[axis].push_back(txcmd);
+            txcmd_list.push_back(txcmd);
         }
 
         // Перемещаем содержимое списка команд в очередь под локом
         {
-            std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
+            std::lock_guard<std::mutex> guard(m_mutex);
             for (TXCmd& cmd: txcmd_list) {
                 m_tx_queues[axis].push_back(std::move(cmd));
+            }
+            if (axis_old_move_mode != axis_cur_move_mode) {
+                const AxisParams& params = axis_move_modes.at(axis_cur_move_mode);
+                for (const AxisParam& p: params) {
+                    m_cur_params[axis][p.index] = p.value;
+                }
             }
         }
 
@@ -506,7 +466,7 @@ protected:
         }
 
         if (m_params_mode[axis] != PARAMS_MODE_AUTOMATIC) {
-            LOG_WARN("SetAxisParams(axis=" << axis << ") failed: 'Automatic' params mode is engaged");
+            LOG_WARN("SetAxisParams(axis=" << axis << ") skipped: 'Automatic' params mode is engaged");
             return false;
         }
 
@@ -516,10 +476,11 @@ protected:
 
         TXCmd txcmd(TXCmd::kSetParams);
 
-        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
+        std::lock_guard<std::mutex> guard(m_mutex);
         for (const AxisParam& p: params) {
             txcmd.param = p;
             m_tx_queues[axis].push_back(txcmd);
+            m_cur_params[axis][p.index] = p.value;
         }
 
         return true;
@@ -541,7 +502,7 @@ protected:
         txcmd.tgt_vel = 0;
         txcmd.tgt_pos = 0;
 
-        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
+        std::lock_guard<std::mutex> guard(m_mutex);
         m_tx_queues[axis].push_back(txcmd);
 
         return true;
@@ -564,7 +525,7 @@ protected:
         txcmd.tgt_vel = 0;
         txcmd.tgt_pos = 0;
 
-        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
+        std::lock_guard<std::mutex> guard(m_mutex);
         m_tx_queues[axis].push_back(txcmd);
 
         // Alarm/error reset
@@ -587,7 +548,31 @@ protected:
     }
 
     const SystemInfo& GetSystemInfo() const {
+        // No need for mutex, as this data is written once in constructor
         return m_sys_info;
+    }
+
+    AxisParamIndexMap GetAvailableAxisParams(const Axis& /* axis */) const {
+        return kWriteSdoIndices;
+    }
+
+    AxisParams GetCurAxisParams(const Axis& axis) const {
+        AxisParams result;
+
+        if (! is_axis_valid(axis)) {
+            return result;
+        }
+
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            for (const auto& param_pair : m_cur_params[axis]) {
+                const uint16_t index = param_pair.first;
+                const int64_t value = param_pair.second;
+                result.push_back({ index, value });
+            }
+        }
+
+        return result;
     }
 
     void CyclicPolling() {
@@ -753,7 +738,7 @@ private:
         return true;
     }
 
-    bool is_axis_valid(const Axis& axis) {
+    bool is_axis_valid(const Axis& axis) const {
         return (axis >= Axis::AXIS_MIN) && (axis < Axis::AXIS_COUNT);
     }
 
@@ -895,6 +880,11 @@ private:
                                       << " = "
                                       << val << ":" << val_size << ", abort_code=" << abort_code);
             }
+
+            // Добавляем в текущие значения 'значимых' параметров для оси
+            if (kWriteSdoIndices.find(index) != kWriteSdoIndices.end()) {
+                m_cur_params[axis][index] = val;
+            }
         }
 
         const auto uploadEthercatRegister = [this](uint16_t axis, uint16_t index, uint8_t subindex) -> int32_t {
@@ -921,7 +911,6 @@ private:
 
     SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& /*cycle_info*/) {
         SystemStatus sys = m_sys_status.load(boost::memory_order_acquire);
-        static int axis_allowed = 0;
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Читаем данные PDO для двигателя c индексом axis
@@ -959,15 +948,19 @@ private:
 
             // Читаем данные sdo
             ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis]);
-            if (axis == axis_allowed && sdo_req_state == EC_REQUEST_SUCCESS) {
+            if (sdo_req_state == EC_REQUEST_SUCCESS) {
                 sys.axes[axis].cur_temperature = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis]));
                 // @todo Вынести в настройки
                 if (cycle_num % 10000 == 0) {
                     ecrt_sdo_request_read(m_temperature_sdo[axis]);
                 }
-            } else if (axis == axis_allowed && sdo_req_state == EC_REQUEST_UNUSED) {
+            } else if (sdo_req_state == EC_REQUEST_UNUSED) {
                 ecrt_sdo_request_read(m_temperature_sdo[axis]);
             }
+
+            // Отладочные данные
+            sys.axes[axis].params_mode = m_params_mode[axis];
+            sys.axes[axis].move_mode = m_cur_move_mode[axis];
         }
 
         sys.reftime = reftime + kEpoch112000DiffNs;
@@ -997,7 +990,7 @@ private:
         static uint64_t cycles_cur = 0;                         // Номер текущего цикла в рамках работы
         static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};     // Номер цикла начала ожидания исполнения команды
 
-        std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
+        std::lock_guard<std::mutex> guard(m_mutex);
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             if (sys.axes[axis].mode == OP_MODE_POINT) {
                 if ((sys.axes[axis].statusword & 0x7) == 0x7) {
@@ -1133,10 +1126,8 @@ private:
             const double mm_val = static_cast<double>(mm_pair.first);
             if (pos_diff_deg < mm_val) {
                 result = mm_pair.first;
-            } else {
                 break;
             }
-
         }
 
         return result;
@@ -1230,7 +1221,8 @@ private:
     constexpr static uint32_t       kRegPerDriveCount       = 12;
     constexpr static MoveMode       kMoveModeInvalid        = -1;
 
-    std::mutex                      m_tx_queues_mutex;
+    mutable std::mutex              m_mutex;
+
     std::list<TXCmd>                m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
 
     //! Структуры для обмена данными по EtherCAT
@@ -1244,7 +1236,7 @@ private:
     ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT];
 
     /* SDO index -> SDO data size */
-    const std::map<uint16_t, uint16_t> kWriteSdoIndices = {
+    const AxisParamIndexMap kWriteSdoIndices = {
         { 0x2100, 2 }
         , { 0x2101, 2 }
         , { 0x2102, 2 }
@@ -1270,9 +1262,9 @@ private:
 
     ParamsMode                      m_params_mode[AXIS_COUNT];
 
-    using MoveModeMap = std::map<MoveMode, AxisParams>;
     MoveModeMap                     m_move_modes[AXIS_COUNT];
     MoveMode                        m_cur_move_mode[AXIS_COUNT];
+    AxisParamValueMap               m_cur_params[AXIS_COUNT];
 
     //! Смещения в данных домена для параметров управления осями.
     uint32_t                        m_offrw_ctrl[AXIS_COUNT];
@@ -1338,6 +1330,14 @@ SystemStatus Control::GetStatusCopy() const {
 
 const SystemInfo& Control::GetSystemInfo() const {
     return m_pimpl->GetSystemInfo();
+}
+
+AxisParamIndexMap Control::GetAvailableAxisParams(const Axis& axis) const {
+    return m_pimpl->GetAvailableAxisParams(axis);
+}
+
+AxisParams Control::GetCurAxisParams(const Axis& axis) const {
+    return m_pimpl->GetCurAxisParams(axis);
 }
 
 void Control::RunStaticTests() {

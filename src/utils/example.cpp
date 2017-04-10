@@ -191,9 +191,12 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
 }
 
 void print_status_cerr(const Drives::SystemStatus& status) {
-    std::cerr << "System > state: " << status.state << " dcsync: " << status.dcsync << std::endl;
-    std::cerr << "    apptime                   : " << status.apptime << std::hex << " = 0x" << status.apptime << std::dec << std::endl;
-    std::cerr << "    reftime                   : " << status.reftime << std::hex << " = 0x" << status.reftime << std::dec << std::endl;
+    std::cerr << "System > state: " << status.state << " dcsync: " << status.dcsync
+              << std::endl << "\t"
+              << "apptime                   : " << status.apptime << std::hex << " = 0x" << status.apptime << std::dec
+              << std::endl << "\t"
+              << "reftime                   : " << status.reftime << std::hex << " = 0x" << status.reftime << std::dec
+              << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
         std::cerr << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
@@ -208,6 +211,9 @@ void print_status_cerr(const Drives::SystemStatus& status) {
                   << " cur/dmd_vel_raw         = " << status.axes[axis].cur_vel << "/" << status.axes[axis].dmd_vel
                   << std::endl << "\t"
                   << " cur_trq: " << status.axes[axis].cur_torq << " cur_tmp: " << status.axes[axis].cur_temperature
+                  << std::endl << "\t"
+                  << " params_mode: " << (status.axes[axis].params_mode == Drives::PARAMS_MODE_AUTOMATIC ? "auto" : "manual")
+                  << " move_mode: " << status.axes[axis].move_mode
                   << std::endl;
     }
 }
