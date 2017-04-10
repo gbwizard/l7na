@@ -10,6 +10,8 @@
 
 #include "l7na/logger.h"
 
+#ifndef L7NA_DISABLE_LOGS
+
 namespace common {
 
 namespace logger = boost::log;
@@ -42,3 +44,5 @@ void InitLogger(const logger::trivial::severity_level& level, const std::string&
 }
 
 } // namespaces
+
+#endif
