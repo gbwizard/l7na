@@ -31,6 +31,54 @@
  *  4. Controlword/Statusword - pretty print.
  */
 
+namespace {
+
+static const Drives::AxisParams kAzimParams_180_Mode = {
+    { 0x2100, 800},
+    { 0x2101, 1},
+    { 0x2102, 1},
+    { 0x2103, 0},
+    { 0x2104, 0},
+    { 0x2105, 0},
+    { 0x2106, 550},
+    { 0x2107, 850},
+    { 0x2108, 25},
+    { 0x2109, 15},
+    { 0x210A, 0},
+    { 0x210B, 1},
+    { 0x2301, 25},
+    { 0x2302, 15},
+    { 0x2303, 0},
+    { 0x2304, 1},
+    { 0x6081, 200000},
+    { 0x6083, 50000},
+    { 0x6084, 50000}
+};
+
+static const Drives::AxisParams kElevParams_180_Mode = {
+    { 0x2100, 2000},
+    { 0x2101, 1},
+    { 0x2102, 1},
+    { 0x2103, 0},
+    { 0x2104, 98},
+    { 0x2105, 0},
+    { 0x2106, 100},
+    { 0x2107, 150},
+    { 0x2108, 1},
+    { 0x2109, 1},
+    { 0x210A, 0},
+    { 0x210B, 0},
+    { 0x2301, 1},
+    { 0x2302, 1},
+    { 0x2303, 10},
+    { 0x2304, 0},
+    { 0x6081, 200000},
+    { 0x6083, 100000},
+    { 0x6084, 100000}
+};
+
+} // namespace
+
 namespace Drives {
 
 namespace fs = boost::filesystem;
@@ -128,6 +176,9 @@ protected:
         , m_domain(NULL)
         , m_domain_data(NULL)
     {
+        m_move_modes[AZIMUTH_AXIS].insert({180, kAzimParams_180_Mode});
+        m_move_modes[ELEVATION_AXIS].insert({180, kElevParams_180_Mode});
+
         std::memset(m_pos_abs_usr_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_usr_off[0])));
         std::memset(m_pos_abs_rel_off, 0, AXIS_COUNT * sizeof(decltype(m_pos_abs_rel_off[0])));
 
@@ -1077,6 +1128,7 @@ private:
 
     MoveMode get_move_mode(const Axis& axis, const double pos_diff_deg) {
         MoveMode result = kMoveModeInvalid;
+
         for (const auto& mm_pair: m_move_modes[axis]) {
             const double mm_val = static_cast<double>(mm_pair.first);
             if (pos_diff_deg < mm_val) {
@@ -1194,10 +1246,21 @@ private:
     /* SDO index -> SDO data size */
     const std::map<uint16_t, uint16_t> kWriteSdoIndices = {
         { 0x2100, 2 }
+        , { 0x2101, 2 }
+        , { 0x2102, 2 }
+        , { 0x2103, 2 }
+        , { 0x2104, 2 }
+        , { 0x2105, 2 }
         , { 0x2106, 2 }
         , { 0x2107, 2 }
         , { 0x2108, 2 }
         , { 0x2109, 2 }
+        , { 0x210A, 2 }
+        , { 0x210B, 2 }
+        , { 0x2301, 2 }
+        , { 0x2302, 2 }
+        , { 0x2303, 2 }
+        , { 0x2304, 2 }
         , { 0x6081, 4 }
         , { 0x6083, 4 }
         , { 0x6084, 4 }
