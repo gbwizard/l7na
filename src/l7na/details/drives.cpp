@@ -446,12 +446,30 @@ protected:
     }
 
     bool AddMoveMode(const Axis& axis, const MoveMode& mode, const AxisParams& params) {
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        std::lock_guard<std::mutex> guard(m_mutex);
         m_move_modes[axis][mode] = params;
         return true;
     }
 
     bool SetParamsMode(const Axis& axis, const ParamsMode& params_mode) {
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        std::lock_guard<std::mutex> guard(m_mutex);
         m_params_mode[axis] = params_mode;
+        return true;
+    }
+
+    bool GetParamsMode(const Axis& axis, ParamsMode& params_mode) const {
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+        params_mode = m_params_mode[axis];
         return true;
     }
 
@@ -1306,6 +1324,10 @@ bool Control::AddMoveMode(const Axis& axis, const MoveMode& mode, const AxisPara
 
 bool Control::SetParamsMode(const Axis& axis, const ParamsMode& params_mode) {
     return m_pimpl->SetParamsMode(axis, params_mode);
+}
+
+bool Control::GetParamsMode(const Axis& axis, ParamsMode& params_mode) const {
+    return m_pimpl->GetParamsMode(axis, params_mode);
 }
 
 bool Control::SetAxisParams(const Axis& axis, const AxisParams& params) {

@@ -123,6 +123,7 @@ public:
      * @param params_mode   Режим выставления параметров двигателя
      */
     bool SetParamsMode(const Axis& axis, const ParamsMode& params_mode);
+    bool GetParamsMode(const Axis& axis, ParamsMode& params_mode) const;
 
     /*! @brief Выставляет параметры оси
      *
