@@ -10,7 +10,6 @@
 #include <functional>
 #include <algorithm>
 #include <map>
-#include <queue>
 #include <list>
 
 #include <boost/filesystem/path.hpp>
@@ -417,18 +416,18 @@ protected:
             txcmd.op_mode = OP_MODE_POINT;
 
             std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
-            m_tx_queues[axis].push(txcmd);
+            m_tx_queues[axis].push_back(txcmd);
 
             // Задаем следующую точку для позиционирования
             txcmd.ctrlword = 0x3F;
-            m_tx_queues[axis].push(txcmd);
+            m_tx_queues[axis].push_back(txcmd);
         }
 
         // Перемещаем содержимое списка команд в очередь под локом
         {
             std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
             for (TXCmd& cmd: txcmd_list) {
-                m_tx_queues[axis].push(std::move(cmd));
+                m_tx_queues[axis].push_back(std::move(cmd));
             }
         }
 
@@ -469,7 +468,7 @@ protected:
         std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
         for (const AxisParam& p: params) {
             txcmd.param = p;
-            m_tx_queues[axis].push(txcmd);
+            m_tx_queues[axis].push_back(txcmd);
         }
 
         return true;
@@ -492,7 +491,7 @@ protected:
         txcmd.tgt_pos = 0;
 
         std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
-        m_tx_queues[axis].push(txcmd);
+        m_tx_queues[axis].push_back(txcmd);
 
         return true;
     }
@@ -515,7 +514,7 @@ protected:
         txcmd.tgt_pos = 0;
 
         std::lock_guard<std::mutex> guard(m_tx_queues_mutex);
-        m_tx_queues[axis].push(txcmd);
+        m_tx_queues[axis].push_back(txcmd);
 
         // Alarm/error reset
         txcmd.ctrlword = 0x86;
@@ -523,7 +522,7 @@ protected:
         txcmd.tgt_vel = 0;
         txcmd.tgt_pos = 0;
 
-        m_tx_queues[axis].push(txcmd);
+        m_tx_queues[axis].push_back(txcmd);
 
         return true;
     }
@@ -938,6 +937,11 @@ private:
         return sys;
     }
 
+    // @todo Записывать все команды для каждой оси в одну датаграмму
+    // Условием для "разрешения" работы с осью является
+    // 1) Нет ошибки по оси
+    // 2) Статус содержит флаг, что предыдущая команда принята прихода в точку принята.
+    // 3) Все SDO-запросы находятся НЕ в состоянии BUSY.
     void prepare_new_commands(const SystemStatus& sys) {
         static uint64_t cycles_cur = 0;                         // Номер текущего цикла в рамках работы
         static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};     // Номер цикла начала ожидания исполнения команды
@@ -952,11 +956,9 @@ private:
                     }
                 } else if ((sys.axes[axis].statusword & 0x8) == 0x8) { // Fault occurred
                     // Proceed to be able to reset fault
+                    cycles_cmd_start[axis] = 0;
                 } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
                     // @todo Report error
-                    // Remove all commands from queue
-                    std::queue<TXCmd> dummy;
-                    m_tx_queues[axis].swap(dummy);
                     cycles_cmd_start[axis] = 0;
                 } else {
                     continue;
@@ -964,6 +966,23 @@ private:
             }
 
             if(! m_tx_queues[axis].size()) {
+                continue;
+            }
+
+            // If idle command queued - give it the highest priority
+            bool flush_queue = false;
+            for (const TXCmd& txcmd: m_tx_queues[axis]) {
+                if (txcmd.type == TXCmd::kCmd && txcmd.op_mode == OP_MODE_IDLE) {
+                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
+                    m_cur_move_mode[axis] = kMoveModeInvalid;
+                    flush_queue = true;
+                }
+            }
+            if (flush_queue) {
+                // Remove all commands from queue
+                m_tx_queues[axis].clear();
+                cycles_cmd_start[axis] = 0;
                 continue;
             }
 
@@ -984,7 +1003,7 @@ private:
                     EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis],  txcmd.tgt_vel);
                 }
                 // Удаляем команду из очереди
-                m_tx_queues[axis].pop();
+                m_tx_queues[axis].pop_front();
             } else if (TXCmd::kSetParams == txcmd.type) {
                 bool axis_params_set = false;
                 std::map<uint16_t, ec_sdo_request*>& axis_write_sdos = m_write_sdos[axis];
@@ -1019,7 +1038,7 @@ private:
                     axis_params_set = true;
 
                     // Удаляем команду из очереди
-                    m_tx_queues[axis].pop();
+                    m_tx_queues[axis].pop_front();
 
                     if(! m_tx_queues[axis].size()) {
                         break;
@@ -1108,6 +1127,8 @@ private:
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     enum OperationMode : uint8_t {
+        OP_MODE_INVALID = 255,
+
         OP_MODE_IDLE = 0,
         OP_MODE_POINT = 1,
         OP_MODE_SCAN = 3
@@ -1124,7 +1145,7 @@ private:
             : tgt_pos(0)
             , tgt_vel(0)
             , ctrlword(0)
-            , op_mode(OP_MODE_IDLE)
+            , op_mode(OP_MODE_INVALID)
             , type(t)
         {}
 
@@ -1158,7 +1179,7 @@ private:
     constexpr static MoveMode       kMoveModeInvalid        = -1;
 
     std::mutex                      m_tx_queues_mutex;
-    std::queue<TXCmd>               m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
+    std::list<TXCmd>                m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
 
     //! Структуры для обмена данными по EtherCAT
     ec_master_t*                    m_master;
