@@ -42,30 +42,6 @@ typedef boost::chrono::system_clock SysClock;
 DECLARE_EXCEPTION(Exception, common::Exception);
 DECLARE_EXCEPTION(TestFailedException, common::Exception);
 
-struct CycleTimeInfo {
-    SysClock::duration period_ns;
-    SysClock::duration exec_ns;
-    SysClock::duration latency_ns;
-    SysClock::duration latency_min_ns;
-    SysClock::duration latency_max_ns;
-    SysClock::duration period_min_ns;
-    SysClock::duration period_max_ns;
-    SysClock::duration exec_min_ns;
-    SysClock::duration exec_max_ns;
-
-    CycleTimeInfo()
-        : period_ns(SysClock::duration::zero())
-        , exec_ns(SysClock::duration::zero())
-        , latency_ns(SysClock::duration::zero())
-        , latency_min_ns(SysClock::duration::max())
-        , latency_max_ns(SysClock::duration::min())
-        , period_min_ns(SysClock::duration::max())
-        , period_max_ns(SysClock::duration::min())
-        , exec_min_ns(SysClock::duration::max())
-        , exec_max_ns(SysClock::duration::min())
-    {}
-};
-
 AxisStatus::AxisStatus()
     : tgt_pos_deg(0.0)
     , cur_pos_deg(0.0)
@@ -93,7 +69,7 @@ bool AxisStatus::IsReady() const {
     return state == AxisState::AXIS_IDLE || state == AxisState::AXIS_SCAN || state == AxisState::AXIS_POINT || state == AxisState::AXIS_ERROR;
 }
 
-SystemStatus::SystemStatus()
+SystemStatus::SystemStatus() noexcept
     : state(SystemState::SYSTEM_OFF)
     , reftime(0)
     , apptime(0)
@@ -374,6 +350,9 @@ protected:
                 const AxisParams& params = axis_move_modes.rbegin()->second;
                 TXCmd txcmd(TXCmd::kSetParams);
                 for (const AxisParam& p: params) {
+                    if (kWriteSdoIndices.find(p.index) == kWriteSdoIndices.end()) {
+                        continue;
+                    }
                     txcmd.param = p;
                     txcmd_list.push_back(txcmd);
                 }
@@ -407,6 +386,9 @@ protected:
                     const AxisParams& params = axis_move_modes.at(move_mode);
                     TXCmd txcmd(TXCmd::kSetParams);
                     for (const AxisParam& p: params) {
+                        if (kWriteSdoIndices.find(p.index) == kWriteSdoIndices.end()) {
+                            continue;
+                        }
                         txcmd.param = p;
                         txcmd_list.push_back(txcmd);
                     }
@@ -593,11 +575,23 @@ protected:
         return result;
     }
 
+    const std::atomic<CycleTimeInfo>& GetCycleTimeInfoRef() const {
+        return m_timing_info;
+    }
+
+    CycleTimeInfo GetCycleTimeInfo() const {
+        return m_timing_info.load(std::memory_order_consume);
+    }
+
+    void ResetCycleTimeInfo() {
+        m_timing_info.store(CycleTimeInfo());
+    }
+
     void CyclicPolling() {
         bool op_state = false;
         uint64_t cycles_total = 0;
 
-        SysClock::time_point wakeup_time = SysClock::now()/*, last_start_time = {}, start_time = {}, end_time = {}*/;
+        SysClock::time_point wakeup_time = SysClock::now();
 
         while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
             wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
@@ -653,11 +647,40 @@ protected:
         m_sys_status.store(s);
 
         cycles_total = 0;
+        SysClock::time_point last_start_time = {}, start_time = {}, end_time = {};
 
         while (! m_stop_flag.load(std::memory_order_consume)) {
             end_time = SysClock::now();
             wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
             boost::this_thread::sleep_until(wakeup_time);
+
+            // Cycle time info gathering
+            CycleTimeInfo timing_info = m_timing_info.load(std::memory_order_consume);
+            start_time = SysClock::now();
+            timing_info.latency_ns = (start_time - wakeup_time).count();
+            timing_info.period_ns = (start_time - last_start_time).count();
+            timing_info.exec_ns = (end_time - last_start_time).count();
+            last_start_time = start_time;
+
+            if (timing_info.latency_ns > timing_info.latency_max_ns) {
+                timing_info.latency_max_ns = timing_info.latency_ns;
+            }
+            if (timing_info.latency_ns < timing_info.latency_min_ns) {
+                timing_info.latency_min_ns = timing_info.latency_ns;
+            }
+            if (timing_info.period_ns > timing_info.period_max_ns) {
+                timing_info.period_max_ns = timing_info.period_ns;
+            }
+            if (timing_info.period_ns < timing_info.period_min_ns) {
+                timing_info.period_min_ns = timing_info.period_ns;
+            }
+            if (timing_info.exec_ns > timing_info.exec_max_ns) {
+                timing_info.exec_max_ns = timing_info.exec_ns;
+            }
+            if (timing_info.exec_ns < timing_info.exec_min_ns) {
+                timing_info.exec_min_ns = timing_info.exec_ns;
+            }
+            m_timing_info.store(timing_info);
 
             // Получаем данные от подчиненных
             ecrt_master_receive(m_master);
@@ -1361,6 +1384,18 @@ AxisParamIndexMap Control::GetAvailableAxisParams(const Axis& axis) const {
 
 AxisParams Control::GetCurAxisParams(const Axis& axis) const {
     return m_pimpl->GetCurAxisParams(axis);
+}
+
+const std::atomic<CycleTimeInfo> &Control::GetCycleTimeInfoRef() const {
+    return m_pimpl->GetCycleTimeInfoRef();
+}
+
+CycleTimeInfo Control::GetCycleTimeInfo() const {
+    return m_pimpl->GetCycleTimeInfo();
+}
+
+void Control::ResetCycleTimeInfo() {
+    m_pimpl->ResetCycleTimeInfo();
 }
 
 void Control::RunStaticTests() {

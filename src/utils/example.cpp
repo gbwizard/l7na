@@ -191,12 +191,18 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
     ++i;
 }
 
-void print_status_cerr(const Drives::SystemStatus& status) {
+void print_status_cerr(const Drives::SystemStatus& status, const Drives::CycleTimeInfo& timing_info) {
     std::cerr << "System > state: " << status.state << " dcsync: " << status.dcsync
               << std::endl << "\t"
               << "apptime                   : " << status.apptime << std::hex << " = 0x" << status.apptime << std::dec
               << std::endl << "\t"
               << "reftime                   : " << status.reftime << std::hex << " = 0x" << status.reftime << std::dec
+              << std::endl << "\t"
+              << "period_ms (min/max)       : " << std::setw(4) << (timing_info.period_min_ns / 1e6) << ":" << std::setw(4) << (timing_info.period_max_ns / 1e6)
+              << std::endl << "\t"
+              << "latency_ms (min/max)      : " << std::setw(4) << (timing_info.latency_min_ns / 1e6) << ":" << std::setw(4) << (timing_info.latency_max_ns / 1e6)
+              << std::endl << "\t"
+              << "exec_ms (min/max)         : " << std::setw(4) << (timing_info.exec_min_ns / 1e6) << ":" << std::setw(4) << (timing_info.exec_max_ns / 1e6)
               << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
@@ -317,6 +323,7 @@ int main(int argc, char* argv[]) {
     control.SetPosAbsPulseOffset(Drives::ELEVATION_AXIS, pos_abs_offset_elev);
 
     const std::atomic<Drives::SystemStatus>& sys_status = control.GetStatusRef();
+    const std::atomic<Drives::CycleTimeInfo>& timing_info = control.GetCycleTimeInfoRef();
 
     std::cerr << "Waiting for system initialization..." << std::endl;
 
@@ -346,7 +353,8 @@ int main(int argc, char* argv[]) {
             print_available_commands();
             continue;
         } else if (cmd_str == "s") {
-            print_status_cerr(sys_status.load(std::memory_order_acquire));
+            print_status_cerr(sys_status.load(std::memory_order_acquire), timing_info.load(std::memory_order_acquire));
+            control.ResetCycleTimeInfo();
             continue;
         } else if (cmd_str == "i") {
             print_info(sys_info);

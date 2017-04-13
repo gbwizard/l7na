@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <limits>
 
 namespace Drives {
 
@@ -83,7 +84,7 @@ enum SystemState : int32_t {
 
 //! @brief Текущие значения, возвращаемые системой управления
 struct SystemStatus {
-    SystemStatus();
+    SystemStatus() noexcept;
 
     AxisStatus axes[AXIS_COUNT];    //!< Статус двигателей по осям
     SystemState state;              //!< Состояние системы
@@ -119,6 +120,30 @@ struct SystemInfo {
 struct AxisParam {
     uint16_t index;
     int64_t value;
+};
+
+struct CycleTimeInfo {
+    uint64_t period_ns;
+    uint64_t exec_ns;
+    uint64_t latency_ns;
+    uint64_t latency_min_ns;
+    uint64_t latency_max_ns;
+    uint64_t period_min_ns;
+    uint64_t period_max_ns;
+    uint64_t exec_min_ns;
+    uint64_t exec_max_ns;
+
+    CycleTimeInfo() noexcept
+        : period_ns(0)
+        , exec_ns(0)
+        , latency_ns(0)
+        , latency_min_ns(std::numeric_limits<decltype(latency_min_ns)>::max())
+        , latency_max_ns(0)
+        , period_min_ns(std::numeric_limits<decltype(period_min_ns)>::max())
+        , period_max_ns(0)
+        , exec_min_ns(std::numeric_limits<decltype(exec_min_ns)>::max())
+        , exec_max_ns(0)
+    {}
 };
 
 using AxisParams = std::vector<AxisParam>;

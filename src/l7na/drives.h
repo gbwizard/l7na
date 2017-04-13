@@ -165,6 +165,10 @@ public:
     AxisParamIndexMap GetAvailableAxisParams(const Axis& axis) const;
     AxisParams GetCurAxisParams(const Axis& axis) const;
 
+    const std::atomic<CycleTimeInfo>& GetCycleTimeInfoRef() const;
+    CycleTimeInfo GetCycleTimeInfo() const;
+    void ResetCycleTimeInfo();
+
     /*! @brief Запускаем статические тесты, печатаем результат
      */
     static void RunStaticTests();
