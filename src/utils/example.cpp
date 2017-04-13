@@ -1,6 +1,7 @@
 #include <iostream>
 #include <chrono>
 #include <fstream>
+#include <atomic>
 
 #include <boost/tokenizer.hpp>
 #include <boost/program_options.hpp>
@@ -239,7 +240,7 @@ void print_available_commands() {
 }
 
 struct StatReader {
-    StatReader(const  boost::atomic<Drives::SystemStatus>& status, const fs::path& outfilepath, uint32_t lograte_us)
+    StatReader(const std::atomic<Drives::SystemStatus>& status, const fs::path& outfilepath, uint32_t lograte_us)
         : stop_(false)
         , status_(status)
         , outfilepath_(outfilepath)
@@ -256,14 +257,14 @@ struct StatReader {
             return;
         }
         while (! stop_) {
-            print_status(status_.load(boost::memory_order_acquire), ofs);
+            print_status(status_.load(std::memory_order_acquire), ofs);
             boost::this_thread::sleep_for(boost::chrono::microseconds(lograte_us_));
         }
         ofs.close();
     }
 
     volatile bool stop_;
-    const boost::atomic<Drives::SystemStatus>& status_;
+    const std::atomic<Drives::SystemStatus>& status_;
     const fs::path outfilepath_;
     const uint32_t lograte_us_;
 };
@@ -315,12 +316,12 @@ int main(int argc, char* argv[]) {
     control.SetPosAbsPulseOffset(Drives::AZIMUTH_AXIS, pos_abs_offset_azim);
     control.SetPosAbsPulseOffset(Drives::ELEVATION_AXIS, pos_abs_offset_elev);
 
-    const boost::atomic<Drives::SystemStatus>& sys_status = control.GetStatusRef();
+    const std::atomic<Drives::SystemStatus>& sys_status = control.GetStatusRef();
 
     std::cerr << "Waiting for system initialization..." << std::endl;
 
     while (1) {
-        const Drives::SystemStatus sys_status_copy = sys_status.load(boost::memory_order_acquire);
+        const Drives::SystemStatus sys_status_copy = sys_status.load(std::memory_order_acquire);
         if ((Drives::AxisState::AXIS_IDLE == sys_status_copy.axes[0].state)
             && (Drives::AxisState::AXIS_IDLE == sys_status_copy.axes[1].state)) {
             break;
@@ -345,7 +346,7 @@ int main(int argc, char* argv[]) {
             print_available_commands();
             continue;
         } else if (cmd_str == "s") {
-            print_status_cerr(sys_status.load(boost::memory_order_acquire));
+            print_status_cerr(sys_status.load(std::memory_order_acquire));
             continue;
         } else if (cmd_str == "i") {
             print_info(sys_info);

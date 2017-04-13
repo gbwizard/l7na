@@ -11,9 +11,9 @@
 #include <algorithm>
 #include <map>
 #include <list>
+#include <atomic>
 
 #include <boost/filesystem/path.hpp>
-#include <boost/atomic/atomic.hpp>
 #include <boost/memory_order.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/chrono/chrono.hpp>
@@ -104,7 +104,7 @@ class Control::Impl {
 public:
     ~Impl() {
         if (m_thread) {
-            m_stop_flag.store(true, boost::memory_order_relaxed);
+            m_stop_flag.store(true, std::memory_order_relaxed);
             m_thread->join();
             m_thread.reset();
         }
@@ -330,7 +330,7 @@ protected:
             LOG_ERROR(ex.what());
 
             // Записываем сотояние системы
-            SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+            SystemStatus s = m_sys_status.load(std::memory_order_acquire);
             s.state = SystemState::SYSTEM_FATAL_ERROR;
             // @todo Возвращать строку ошибки
             // s.error_str = ex.what();
@@ -349,7 +349,7 @@ protected:
     }
 
     bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/sec*/) {
-        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
         if (! is_system_ready(s)) {
             return false;
         }
@@ -474,7 +474,7 @@ protected:
     }
 
     bool SetAxisParams(const Axis& axis, const AxisParams& params) {
-        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
         if (! is_system_ready(s)) {
             return false;
         }
@@ -505,7 +505,7 @@ protected:
     }
 
     bool SetModeIdle(const Axis& axis) {
-        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
         if (! is_system_ready(s)) {
             return false;
         }
@@ -527,7 +527,7 @@ protected:
     }
 
     bool ResetFault(const Axis& axis) {
-        const SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
         if (! is_system_ready(s)) {
             return false;
         }
@@ -557,12 +557,12 @@ protected:
         return true;
     }
 
-    const boost::atomic<SystemStatus>& GetStatusRef() const {
+    const std::atomic<SystemStatus>& GetStatusRef() const {
         return m_sys_status;
     }
 
     SystemStatus GetStatusCopy() const {
-        return m_sys_status.load(boost::memory_order_acquire);
+        return m_sys_status.load(std::memory_order_acquire);
     }
 
     const SystemInfo& GetSystemInfo() const {
@@ -599,7 +599,7 @@ protected:
 
         SysClock::time_point wakeup_time = SysClock::now()/*, last_start_time = {}, start_time = {}, end_time = {}*/;
 
-        while (! op_state && ! m_stop_flag.load(boost::memory_order_consume)) {
+        while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
             wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
             boost::this_thread::sleep_until(wakeup_time);
 
@@ -646,7 +646,7 @@ protected:
         }
 
         // Устанавливаем статус системы в IDLE
-        SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+        SystemStatus s = m_sys_status.load(std::memory_order_acquire);
         s.state = SystemState::SYSTEM_OK;
         s.axes[AZIMUTH_AXIS].state = AxisState::AXIS_IDLE;
         s.axes[ELEVATION_AXIS].state = AxisState::AXIS_IDLE;
@@ -654,9 +654,8 @@ protected:
 
         cycles_total = 0;
 
-        CycleTimeInfo cycle_info;
-
-        while (! m_stop_flag.load(boost::memory_order_consume)) {
+        while (! m_stop_flag.load(std::memory_order_consume)) {
+            end_time = SysClock::now();
             wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
             boost::this_thread::sleep_until(wakeup_time);
 
@@ -674,7 +673,7 @@ protected:
             uint32_t lo_ref_time = 0;
             const int err = ecrt_master_reference_clock_time(m_master, &lo_ref_time);
             if (err) {
-                // SystemStatus s = m_sys_status.load(boost::memory_order_acquire);
+                // SystemStatus s = m_sys_status.load(std::memory_order_acquire);
                 // s.state = SystemState::SYSTEM_ERROR;
                 // m_sys_status.store(s);
                 // @todo save error code
@@ -684,7 +683,7 @@ protected:
             const uint64_t ref_time = (app_time & 0xFFFFFFFF00000000UL) | lo_ref_time;
 
             // Обрабатываем пришедшие данные
-            const SystemStatus s = process_received_data(cycles_total, app_time, ref_time, dcsync, cycle_info);
+            const SystemStatus s = process_received_data(cycles_total, app_time, ref_time, dcsync);
 
             // Если есть новые команды - передаем их подчиненным
             prepare_new_commands(s);
@@ -700,6 +699,8 @@ protected:
             // Отправляем данные подчиненным
             ecrt_domain_queue(m_domain);
             ecrt_master_send(m_master);
+
+            ++cycles_total;
         }
 
         ecrt_master_receive(m_master);
@@ -927,8 +928,8 @@ private:
         }
     }
 
-    SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync, const CycleTimeInfo& /*cycle_info*/) {
-        SystemStatus sys = m_sys_status.load(boost::memory_order_acquire);
+    SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync) {
+        SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
 
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Читаем данные PDO для двигателя c индексом axis
@@ -994,7 +995,7 @@ private:
             sys.state = SystemState::SYSTEM_ERROR;
         }
 
-        m_sys_status.store(sys, boost::memory_order_relaxed);
+        m_sys_status.store(sys, std::memory_order_relaxed);
 
         return sys;
     }
@@ -1221,12 +1222,12 @@ private:
     Config::Storage                 m_config;       //!< Конфигурация двигателей, задаваемая пользователем
     std::map<uint16_t, int64_t>     m_sdo_cfg;      //!< Конфигурация SDO
     SystemInfo                      m_sys_info;     //!< Структура с статической информацией о системе
-    boost::atomic<SystemStatus>     m_sys_status;   //!< Структура с динамической информацией о системе
+    std::atomic<SystemStatus>       m_sys_status;   //!< Структура с динамической информацией о системе
+    std::atomic<CycleTimeInfo>      m_timing_info;  //!< Структура с информацией о временных характеристиках работы
 
     //! Данные для взаимодействия с потоком циклического взаимодействия с сервоусилителями
-    boost::atomic<bool>             m_stop_flag;    //!< Флаг остановки потока взаимодействия
+    std::atomic<bool>               m_stop_flag;    //!< Флаг остановки потока взаимодействия
     std::unique_ptr<std::thread>    m_thread;       //!< Поток циклического обмена данными со сервоусилителями
-
 
     constexpr static uint64_t       kMaxAxisReadyCycles     = 8192;
     constexpr static uint64_t       kMaxDomainInitCycles    = 8192;
@@ -1342,7 +1343,7 @@ bool Control::ResetFault(const Axis& axis) {
     return m_pimpl->ResetFault(axis);
 }
 
-const boost::atomic<SystemStatus>& Control::GetStatusRef() const {
+const std::atomic<SystemStatus>& Control::GetStatusRef() const {
     return m_pimpl->GetStatusRef();
 }
 

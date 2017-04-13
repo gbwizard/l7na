@@ -167,7 +167,6 @@ message(STATUS "Using ranlib: ${CMAKE_RANLIB}")
 message(STATUS "Using strip: ${CMAKE_STRIP}")
 
 find_package(Boost ${BOOST_VERSION} REQUIRED
-    atomic
     chrono
     date_time
     filesystem

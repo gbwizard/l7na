@@ -13,7 +13,7 @@ target_link_libraries(servoexample
     ${Boost_LOG_LIBRARY}
     ${Boost_THREAD_LIBRARY}
     ${Boost_SYSTEM_LIBRARY}
-    ${Boost_ATOMIC_LIBRARY}
+    atomic
     pthread
     rt
 )
@@ -33,7 +33,7 @@ target_link_libraries(servotests
     ${Boost_LOG_LIBRARY}
     ${Boost_THREAD_LIBRARY}
     ${Boost_SYSTEM_LIBRARY}
-    ${Boost_ATOMIC_LIBRARY}
+    atomic
     pthread
     rt
 )

@@ -3,8 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-
-#include <boost/atomic/atomic.hpp>
+#include <atomic>
 
 #include "types.h"
 #include "configfile.h"
@@ -153,7 +152,7 @@ public:
      *
      *  @return Структуру Status, заполненную актуальными данными.
      */
-    const boost::atomic<SystemStatus>& GetStatusRef() const;
+    const std::atomic<SystemStatus>& GetStatusRef() const;
 
     SystemStatus GetStatusCopy() const;
 
