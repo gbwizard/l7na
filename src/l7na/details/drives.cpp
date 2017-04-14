@@ -472,7 +472,7 @@ protected:
             return false;
         }
 
-        if (m_params_mode[axis] != PARAMS_MODE_AUTOMATIC) {
+        if (m_params_mode[axis] == PARAMS_MODE_AUTOMATIC) {
             LOG_WARN("SetAxisParams(axis=" << axis << ") skipped: 'Automatic' params mode is engaged");
             return false;
         }
