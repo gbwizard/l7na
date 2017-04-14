@@ -293,6 +293,13 @@ protected:
             LOG_INFO("Domain data registered");
 
             m_thread.reset(new std::thread(std::bind(&Impl::CyclicPolling, this)));
+            sched_param param{5};
+            const int ret = ::pthread_setschedparam(m_thread->native_handle(), SCHED_RR, &param);
+            if (! ret) {
+                LOG_WARN("Setup scheduling params for polling thread OK");
+            } else {
+                LOG_WARN("Setup scheduling params for polling thread failed: " << ret);
+            }
 
             LOG_INFO("Cyclic polling thread started");
 
