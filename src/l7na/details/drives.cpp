@@ -1266,7 +1266,7 @@ private:
     constexpr static double         kPulsesPerDegree        = 1048576.0 / 360.0;
     constexpr static uint64_t       kEpoch112000DiffNs      = 946684800000000000ULL;
     constexpr static uint32_t       kCmdQueueCapacity       = 128;
-    constexpr static uint32_t       kCyclePeriodNs          = 10000000;
+    constexpr static uint32_t       kCyclePeriodNs          = 1000000;
     constexpr static uint32_t       kRegPerDriveCount       = 12;
     constexpr static MoveMode       kMoveModeInvalid        = -1;
 
