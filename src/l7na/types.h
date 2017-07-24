@@ -66,7 +66,9 @@ struct AxisStatus {
     int32_t     cur_torq;               //!< Текущий момент [единиц 0,1% от _номинального_ момента двигателя]
     AxisState   state;                  //!< Текущее состояние системы управления осью
     uint32_t    error_code;             //!< Код ошибки двигателя по CiA402
-    int32_t     cur_temperature;        //!< Текущая температура для сервоусилителя
+    int32_t     cur_temperature0;       //!< Текущая температура для сервоусилителя 0
+    int32_t     cur_temperature1;       //!< Текущая температура для сервоусилителя 1
+    int32_t     cur_temperature2;       //!< Текущая температура для сервоусилителя 2
     uint16_t    ctrlword;               //!< Битовая маска управления приводом (для отладки)
     uint16_t    statusword;             //!< Битовая маска текущего состояния привода (для отладки)
     uint16_t    mode;                   //!< Текущий режим работы (для отладки)
@@ -96,16 +98,16 @@ struct SystemStatus {
 //! @brief Статическая информация для одной оси. Заполняется один раз при инициализации.
 struct AxisInfo {
     AxisInfo()
-        : encoder_resolution(0)
+        : encoder_pulses_per_rev(0)
         , dev_name()
         , hw_version()
         , sw_version()
     {}
 
-    uint16_t        encoder_resolution; //!< Разрешение энкодера
-    std::string     dev_name;           //!< Название устройства
-    std::string     hw_version;         //!< Версия аппаратного обепечения
-    std::string     sw_version;         //!< Версия программного обеспечения
+    uint32_t        encoder_pulses_per_rev; //!< Разрешение энкодера
+    std::string     dev_name;               //!< Название устройства
+    std::string     hw_version;             //!< Версия аппаратного обепечения
+    std::string     sw_version;             //!< Версия программного обеспечения
 };
 
 //! @brief Статическая информация для системы

@@ -42,6 +42,8 @@ typedef boost::chrono::system_clock SysClock;
 DECLARE_EXCEPTION(Exception, common::Exception);
 DECLARE_EXCEPTION(TestFailedException, common::Exception);
 
+const size_t gkTempSensorsCount = 3;
+
 AxisStatus::AxisStatus()
     : tgt_pos_deg(0.0)
     , cur_pos_deg(0.0)
@@ -59,7 +61,9 @@ AxisStatus::AxisStatus()
     , cur_torq(0)
     , state(AxisState::AXIS_OFF)
     , error_code(0)
-    , cur_temperature(0)
+    , cur_temperature0(0)
+    , cur_temperature1(0)
+    , cur_temperature2(0)
     , ctrlword(0)
     , statusword(0)
     , mode(0)
@@ -138,7 +142,7 @@ protected:
 
             // Создаем объекты конфигурации подчиненных.
             for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
-                m_slave_cfg[d] = ecrt_master_slave_config(m_master, 0, d, 0x00007595, 0x00000000);
+                m_slave_cfg[d] = ecrt_master_slave_config(m_master, 0, d, 0x00007595, 0x00010001);
             }
 
             bool all_slave_configs_ok = true;
@@ -160,7 +164,7 @@ protected:
                 {0x607A, 0, 32},    // Target position value
                 {0x6062, 0, 32},    // Demand position value
                 {0x6064, 0, 32},    // Actual position value
-                {0x260D, 0, 32},    // Actual position value (absolute)
+                {0x2607, 0, 32},    // Actual position value (absolute)
                 {0x603F, 0, 16},    // Error code
                 {0x606B, 0, 32},    // Demand velocity Value
                 {0x606C, 0, 32},    // Actual velocity value
@@ -187,8 +191,8 @@ protected:
             // { sync_mgr_idx, sync_mgr_direction, pdo_num, pdo_ptr, watch_dog_mode }
             // { 0xFF - end marker}
             ec_sync_info_t l7na_syncs[] = {
-                {2, EC_DIR_OUTPUT, 1, l7na_rx_pdos, EC_WD_DISABLE},
-                {3, EC_DIR_INPUT, 1, l7na_tx_pdos, EC_WD_DISABLE},
+                {2, EC_DIR_OUTPUT, 1, l7na_rx_pdos, EC_WD_DEFAULT},
+                {3, EC_DIR_INPUT, 1, l7na_tx_pdos, EC_WD_DEFAULT},
                 {0xFF}
             };
 
@@ -197,36 +201,38 @@ protected:
                 if (ecrt_slave_config_pdos(m_slave_cfg[d], EC_END, l7na_syncs)) {
                     BOOST_THROW_EXCEPTION(Exception("Failed to configure slave #") << d << " pdos");
                 }
+
+                ecrt_slave_config_watchdog(m_slave_cfg[d], 0, 0);
             }
 
             LOG_INFO("Configuring slave PDOs and sync managers done");
 
             static const ec_pdo_entry_reg_t kDomainPDOs[] = {
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6040, 0, &m_offrw_ctrl[ELEVATION_AXIS]},        //!< Control word
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6041, 0, &m_offro_status[ELEVATION_AXIS]},      //!< Status word
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x607A, 0, &m_offrw_tgt_pos[ELEVATION_AXIS]},     //!< Target position
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6062, 0, &m_offro_dmd_pos[ELEVATION_AXIS]},     //!< Demand position
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6064, 0, &m_offro_act_pos[ELEVATION_AXIS]},     //!< Actual position
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[ELEVATION_AXIS]},     //!< Target velocity
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[ELEVATION_AXIS]},     //!< Demand velocity
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[ELEVATION_AXIS]},     //!< Actual velocity
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x260D, 0, &m_offro_act_pos_abs[ELEVATION_AXIS]}, //!< Actual position (absolute)
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[ELEVATION_AXIS]},    //!< Actual drive mode of operation
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[ELEVATION_AXIS]},    //!< Actual torque
-                {0, ELEVATION_AXIS, 0x00007595, 0x00000000, 0x603F, 0, &m_offro_err_code[ELEVATION_AXIS]},    //!< Error code
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x6040, 0, &m_offrw_ctrl[ELEVATION_AXIS]},        //!< Control word
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x6041, 0, &m_offro_status[ELEVATION_AXIS]},      //!< Status word
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x607A, 0, &m_offrw_tgt_pos[ELEVATION_AXIS]},     //!< Target position
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x6062, 0, &m_offro_dmd_pos[ELEVATION_AXIS]},     //!< Demand position
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x6064, 0, &m_offro_act_pos[ELEVATION_AXIS]},     //!< Actual position
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x60FF, 0, &m_offrw_tgt_vel[ELEVATION_AXIS]},     //!< Target velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x606B, 0, &m_offro_dmd_vel[ELEVATION_AXIS]},     //!< Demand velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x606C, 0, &m_offro_act_vel[ELEVATION_AXIS]},     //!< Actual velocity
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x2607, 0, &m_offro_act_pos_abs[ELEVATION_AXIS]}, //!< Actual position (absolute)
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x6060, 0, &m_offrw_act_mode[ELEVATION_AXIS]},    //!< Actual drive mode of operation
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x6077, 0, &m_offro_act_torq[ELEVATION_AXIS]},    //!< Actual torque
+                {0, ELEVATION_AXIS, 0x00007595, 0x00010001, 0x603F, 0, &m_offro_err_code[ELEVATION_AXIS]},    //!< Error code
 
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6040, 0, &m_offrw_ctrl[AZIMUTH_AXIS]},          //!< Control word
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6041, 0, &m_offro_status[AZIMUTH_AXIS]},        //!< Status word
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x607A, 0, &m_offrw_tgt_pos[AZIMUTH_AXIS]},       //!< Target position
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6062, 0, &m_offro_dmd_pos[AZIMUTH_AXIS]},       //!< Demand position
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6064, 0, &m_offro_act_pos[AZIMUTH_AXIS]},       //!< Actual position
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x60FF, 0, &m_offrw_tgt_vel[AZIMUTH_AXIS]},       //!< Target velocity
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606B, 0, &m_offro_dmd_vel[AZIMUTH_AXIS]},       //!< Demand velocity
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x606C, 0, &m_offro_act_vel[AZIMUTH_AXIS]},       //!< Actual velocity
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x260D, 0, &m_offro_act_pos_abs[AZIMUTH_AXIS]},   //!< Actual position (absolute)
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_AXIS]},      //!< Actual drive mode of operation
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x6077, 0, &m_offro_act_torq[AZIMUTH_AXIS]},      //!< Actual torque
-                {0, AZIMUTH_AXIS,   0x00007595, 0x00000000, 0x603F, 0, &m_offro_err_code[AZIMUTH_AXIS]},      //!< Error code
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x6040, 0, &m_offrw_ctrl[AZIMUTH_AXIS]},          //!< Control word
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x6041, 0, &m_offro_status[AZIMUTH_AXIS]},        //!< Status word
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x607A, 0, &m_offrw_tgt_pos[AZIMUTH_AXIS]},       //!< Target position
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x6062, 0, &m_offro_dmd_pos[AZIMUTH_AXIS]},       //!< Demand position
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x6064, 0, &m_offro_act_pos[AZIMUTH_AXIS]},       //!< Actual position
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x60FF, 0, &m_offrw_tgt_vel[AZIMUTH_AXIS]},       //!< Target velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x606B, 0, &m_offro_dmd_vel[AZIMUTH_AXIS]},       //!< Demand velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x606C, 0, &m_offro_act_vel[AZIMUTH_AXIS]},       //!< Actual velocity
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x2607, 0, &m_offro_act_pos_abs[AZIMUTH_AXIS]},   //!< Actual position (absolute)
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x6060, 0, &m_offrw_act_mode[AZIMUTH_AXIS]},      //!< Actual drive mode of operation
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x6077, 0, &m_offro_act_torq[AZIMUTH_AXIS]},      //!< Actual torque
+                {0, AZIMUTH_AXIS,   0x00007595, 0x00010001, 0x603F, 0, &m_offro_err_code[AZIMUTH_AXIS]},      //!< Error code
 
                 {}
             };
@@ -298,7 +304,7 @@ protected:
             if (! ret) {
                 LOG_WARN("Setup scheduling params for polling thread OK");
             } else {
-                LOG_WARN("Setup scheduling params for polling thread failed: " << ret);
+                LOG_WARN("Setup scheduling params for polling thread failed, errno: " << errno);
             }
 
             LOG_INFO("Cyclic polling thread started");
@@ -747,7 +753,7 @@ private:
             uint32_t abort_code;
             const size_t kStrLen = 1024;
             char str[kStrLen];
-            result |= ecrt_master_sdo_upload(m_master, axis, 0x2002, 0, reinterpret_cast<uint8_t*>(&(sysinfo.axes[axis].encoder_resolution)), sizeof(sysinfo.axes[axis].encoder_resolution), &result_size, &abort_code);
+            result |= ecrt_master_sdo_upload(m_master, axis, 0x2002, 0, reinterpret_cast<uint8_t*>(&(sysinfo.axes[axis].encoder_pulses_per_rev)), sizeof(sysinfo.axes[axis].encoder_pulses_per_rev), &result_size, &abort_code);
 
             result |= ecrt_master_sdo_upload(m_master, axis, 0x1008, 0, reinterpret_cast<uint8_t*>(&str[0]), kStrLen, &result_size, &abort_code);
             if (result_size) {
@@ -880,12 +886,14 @@ private:
     bool create_sdo_requests() {
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Temperature
-            m_temperature_sdo[axis] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x2610, 0, 2);
-            if (! m_temperature_sdo[axis]) {
-                return false;
+            for (size_t i = 0; i < gkTempSensorsCount; ++i) {
+                m_temperature_sdo[axis][i] = ecrt_slave_config_create_sdo_request(m_slave_cfg[axis], 0x260B, 0, 2);
+                if (! m_temperature_sdo[axis][i]) {
+                    return false;
+                }
+                // @todo Вынести в настройки
+                ecrt_sdo_request_timeout(m_temperature_sdo[axis][i], 10000 /*ms*/);
             }
-            // @todo Вынести в настройки
-            ecrt_sdo_request_timeout(m_temperature_sdo[axis], 10000 /*ms*/);
 
             // Sdos for download
             std::map<uint16_t, ec_sdo_request_t*>& axis_write_sdos = m_write_sdos[axis];
@@ -925,8 +933,7 @@ private:
             const int result = ecrt_master_sdo_download(m_master, axis, index, subindex, reinterpret_cast<uint8_t*>(&val), val_size, &abort_code);
             if (result) {
                 BOOST_THROW_EXCEPTION(Exception("Pre-realtime slave setup failed. Key=") << axis << ":"
-                                      << index << ":" << static_cast<uint16_t>(subindex)
-                                      << " = "
+                                      << index << " :" << static_cast<uint16_t>(subindex) << " = "
                                       << val << ":" << val_size << ", abort_code=" << abort_code);
             }
 
@@ -953,7 +960,7 @@ private:
         // Get absolute-relative position offset for axes
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             const int32_t rel_pos = uploadEthercatRegister(axis, 0x6064, 0);
-            const int32_t abs_pos = uploadEthercatRegister(axis, 0x260D, 0);
+            const int32_t abs_pos = uploadEthercatRegister(axis, 0x2607, 0);
             m_pos_abs_rel_off[axis] = (rel_pos % kPulsesPerTurn) - abs_pos;
         }
     }
@@ -996,15 +1003,17 @@ private:
             }
 
             // Читаем данные sdo
-            ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis]);
-            if (sdo_req_state == EC_REQUEST_SUCCESS) {
-                sys.axes[axis].cur_temperature = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis]));
-                // @todo Вынести в настройки
-                if (cycle_num % 10000 == 0) {
-                    ecrt_sdo_request_read(m_temperature_sdo[axis]);
+            for (size_t i = 0; i < gkTempSensorsCount; ++i) {
+                const ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis][i]);
+                if (sdo_req_state == EC_REQUEST_SUCCESS) {
+                    sys.axes[axis].cur_temperature0 = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis][i]));
+                    // @todo Вынести в настройки
+                    if (cycle_num % 10000 == 0) {
+                        ecrt_sdo_request_read(m_temperature_sdo[axis][i]);
+                    }
+                } else if (sdo_req_state == EC_REQUEST_UNUSED) {
+                    ecrt_sdo_request_read(m_temperature_sdo[axis][i]);
                 }
-            } else if (sdo_req_state == EC_REQUEST_UNUSED) {
-                ecrt_sdo_request_read(m_temperature_sdo[axis]);
             }
 
             // Отладочные данные
@@ -1282,7 +1291,7 @@ private:
     uint8_t*                        m_domain_data;
     ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
 
-    ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT];
+    ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT][3];
 
     /* SDO index -> SDO data size */
     const AxisParamIndexMap kWriteSdoIndices = {

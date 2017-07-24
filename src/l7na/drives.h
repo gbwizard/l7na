@@ -56,7 +56,7 @@ public:
      *
      *  @param   cfg_file_path  Путь к файлу с конфигурацией системы (абсолютный или относительно текущей рабочей директории)
      */
-    Control(const Config::Storage& config, const ParamsMode params_mode = PARAMS_MODE_AUTOMATIC);
+    Control(const Config::Storage& config, const ParamsMode params_mode = PARAMS_MODE_MANUAL);
 
     /*! @brief Деструктор. Приводит систему управления в первоначальное состояние/выключает систему управления.
      */

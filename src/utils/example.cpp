@@ -185,7 +185,7 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
                   << std::dec << "|" << status.axes[axis].mode
                   << "|" << status.axes[axis].cur_pos_deg  << "|" << status.axes[axis].tgt_pos_deg << "|" << status.axes[axis].dmd_pos_deg
                   << "|" << status.axes[axis].cur_vel_deg  << "|" << status.axes[axis].tgt_vel_deg << "|" << status.axes[axis].dmd_vel_deg
-                  << "|" << status.axes[axis].cur_torq << "|" << status.axes[axis].cur_temperature;
+                  << "|" << status.axes[axis].cur_torq << "|" << status.axes[axis].cur_temperature0;
     }
     os << std::endl;
     ++i;
@@ -217,7 +217,7 @@ void print_status_cerr(const Drives::SystemStatus& status, const Drives::CycleTi
                   << std::endl << "\t"
                   << " cur/dmd_vel_raw         = " << status.axes[axis].cur_vel << "/" << status.axes[axis].dmd_vel
                   << std::endl << "\t"
-                  << " cur_trq: " << status.axes[axis].cur_torq << " cur_tmp: " << status.axes[axis].cur_temperature
+                  << " cur_trq: " << status.axes[axis].cur_torq << " cur_tmp: " << status.axes[axis].cur_temperature0
                   << std::endl << "\t"
                   << " params_mode: " << (status.axes[axis].params_mode == Drives::PARAMS_MODE_AUTOMATIC ? "auto" : "manual")
                   << " move_mode: " << status.axes[axis].move_mode
@@ -227,7 +227,7 @@ void print_status_cerr(const Drives::SystemStatus& status, const Drives::CycleTi
 
 void print_info(const Drives::SystemInfo& info) {
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
-        std::cerr << "Axis " << axis << " > dev_name: " << info.axes[axis].dev_name << " encoder_resolution: " << info.axes[axis].encoder_resolution
+        std::cerr << "Axis " << axis << " > dev_name: " << info.axes[axis].dev_name << " encoder_pulses_per_rev: " << info.axes[axis].encoder_pulses_per_rev
                   << " hw_version: " << info.axes[axis].hw_version << " sw_version: " << info.axes[axis].sw_version << std::endl;
     }
 }
