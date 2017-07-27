@@ -349,7 +349,7 @@ protected:
 
         std::list<TXCmd> txcmd_list;
         MoveMode& axis_cur_move_mode = m_cur_move_mode[axis];
-        const MoveMode axis_old_move_mode = m_cur_move_mode[axis];
+        // const MoveMode axis_old_move_mode = m_cur_move_mode[axis];
         const MoveModeMap& axis_move_modes = m_move_modes[axis];
         const ParamsMode& axis_params_mode = m_params_mode[axis];
 
@@ -429,12 +429,12 @@ protected:
             for (TXCmd& cmd: txcmd_list) {
                 m_tx_queues[axis].push_back(std::move(cmd));
             }
-            if (axis_old_move_mode != axis_cur_move_mode) {
-                const AxisParams& params = axis_move_modes.at(axis_cur_move_mode);
-                for (const AxisParam& p: params) {
-                    m_cur_params[axis][p.index] = p.value;
-                }
-            }
+//            if (axis_old_move_mode != axis_cur_move_mode) {
+//                const AxisParams& params = axis_move_modes.at(axis_cur_move_mode);
+//                for (const AxisParam& p: params) {
+//                    m_cur_params[axis][p.index] = p.value;
+//                }
+//            }
         }
 
         return true;
@@ -1300,17 +1300,14 @@ private:
         , { 0x2102, 2 }
         , { 0x2103, 2 }
         , { 0x2104, 2 }
-        , { 0x2105, 2 }
-        , { 0x2106, 2 }
-        , { 0x2107, 2 }
-        , { 0x2108, 2 }
         , { 0x2109, 2 }
         , { 0x210A, 2 }
         , { 0x210B, 2 }
-        , { 0x2301, 2 }
-        , { 0x2302, 2 }
-        , { 0x2303, 2 }
-        , { 0x2304, 2 }
+        , { 0x210C, 2 }
+        , { 0x210D, 2 }
+        , { 0x210E, 2 }
+        , { 0x210F, 2 }
+        , { 0x2110, 2 }
         , { 0x6081, 4 }
         , { 0x6083, 4 }
         , { 0x6084, 4 }
