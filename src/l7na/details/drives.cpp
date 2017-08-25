@@ -42,7 +42,11 @@ typedef boost::chrono::system_clock SysClock;
 DECLARE_EXCEPTION(Exception, common::Exception);
 DECLARE_EXCEPTION(TestFailedException, common::Exception);
 
+namespace {
+
 const size_t gkTempSensorsCount = 3;
+
+} // namespaces
 
 AxisStatus::AxisStatus()
     : tgt_pos_deg(0.0)
@@ -106,6 +110,7 @@ protected:
         , m_sys_status{}
         , m_stop_flag(false)
         , m_thread()
+        , m_tx_queues()
         , m_master(NULL)
         , m_domain(NULL)
         , m_domain_data(NULL)
@@ -119,6 +124,7 @@ protected:
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             m_params_mode[axis] = params_mode;
             m_cur_move_mode[axis] = kMoveModeInvalid;
+            m_tx_queues[axis].push_back(kTxCmdIdle);
         }
 
         try {
@@ -349,7 +355,7 @@ protected:
 
         std::list<TXCmd> txcmd_list;
         MoveMode& axis_cur_move_mode = m_cur_move_mode[axis];
-        // const MoveMode axis_old_move_mode = m_cur_move_mode[axis];
+        const MoveMode axis_old_move_mode = m_cur_move_mode[axis];
         const MoveModeMap& axis_move_modes = m_move_modes[axis];
         const ParamsMode& axis_params_mode = m_params_mode[axis];
 
@@ -429,12 +435,12 @@ protected:
             for (TXCmd& cmd: txcmd_list) {
                 m_tx_queues[axis].push_back(std::move(cmd));
             }
-//            if (axis_old_move_mode != axis_cur_move_mode) {
-//                const AxisParams& params = axis_move_modes.at(axis_cur_move_mode);
-//                for (const AxisParam& p: params) {
-//                    m_cur_params[axis][p.index] = p.value;
-//                }
-//            }
+            if (axis_old_move_mode != axis_cur_move_mode) {
+                const AxisParams& params = axis_move_modes.at(axis_cur_move_mode);
+                for (const AxisParam& p: params) {
+                    m_cur_params[axis][p.index] = p.value;
+                }
+            }
         }
 
         return true;
@@ -1242,20 +1248,29 @@ private:
             kCmd
         };
 
-        explicit TXCmd(const Type& t = kTypeUnknown)
-            : tgt_pos(0)
-            , tgt_vel(0)
-            , ctrlword(0)
-            , op_mode(OP_MODE_INVALID)
-            , type(t)
+        TXCmd(const OperationMode& op, uint16_t ctrl, int32_t pos, int32_t vel)
+            : tgt_pos(pos)
+            , tgt_vel(vel)
+            , ctrlword(ctrl)
+            , op_mode(op)
+            , type(kCmd)
         {}
 
-        int32_t tgt_pos;
-        int32_t tgt_vel;
-        uint16_t ctrlword;
-        OperationMode op_mode;
-        Type type;
-        AxisParam param;
+        TXCmd(uint16_t par, int64_t val)
+            : type(kSetParams)
+            , param{par, val}
+        {}
+
+        explicit TXCmd(const Type& t)
+            : type(t)
+        {}
+
+        int32_t tgt_pos = 0;
+        int32_t tgt_vel = 0;
+        uint16_t ctrlword = 0;
+        OperationMode op_mode = OP_MODE_INVALID;
+        Type type = kTypeUnknown;
+        AxisParam param = {0,0};
     };
 
     Config::Storage                 m_config;       //!< Конфигурация двигателей, задаваемая пользователем
@@ -1282,6 +1297,7 @@ private:
     mutable std::mutex              m_mutex;
 
     std::list<TXCmd>                m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
+    const TXCmd                     kTxCmdIdle = {OP_MODE_IDLE, 0x6, 0, 0};
 
     //! Структуры для обмена данными по EtherCAT
     ec_master_t*                    m_master;
@@ -1307,7 +1323,11 @@ private:
         , { 0x210D, 2 }
         , { 0x210E, 2 }
         , { 0x210F, 2 }
-        , { 0x2110, 2 }
+        , { 0x2114, 2 }
+        , { 0x2115, 2 }
+        , { 0x2116, 2 }
+        , { 0x2117, 2 }
+        , { 0x2118, 2 }
         , { 0x6081, 4 }
         , { 0x6083, 4 }
         , { 0x6084, 4 }
