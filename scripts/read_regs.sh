@@ -139,6 +139,8 @@ REGS=(
     0x2518
     0x2519
 
+    0x6040
+    0x6041
     0x605A
     0x605B
     0x605C
@@ -304,6 +306,8 @@ TYPES=(
     [0x2518]=uint16
     [0x2519]=uint16
 
+    [0x6040]=uint16
+    [0x6041]=uint16
     [0x605A]=int16
     [0x605B]=int16
     [0x605C]=int16
@@ -463,6 +467,8 @@ NAMES=(
     [0x2518]="Vibration Suppression Filter 2 Frequency"
     [0x2519]="Vibration Suppression Filter 2 Dumping"
 
+    [0x6040]="Controlword"
+    [0x6041]="Statusword"
     [0x605A]="Quick Stop Option Code"
     [0x605B]="Shutdown Option Code"
     [0x605C]="Disable Operation Option Code"
@@ -512,7 +518,7 @@ read_reg() {
 print_header() {
     local w=$1
     local header="\n %-${w}s %-${w}s %-${w}s %-${w}s\n"
-    echo "Time: $(date)"
+    echo Time: $(date)
     printf "$header" "REG" "AZIM" "ELEV" "NAME" 
     local delim="=================================================="
     delim=$delim$delim"\n"
