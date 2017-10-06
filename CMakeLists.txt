@@ -177,7 +177,7 @@ find_package(Boost ${BOOST_VERSION} REQUIRED
     thread
 )
 
-set(ETHERCAT_DIR ${CMAKE_SOURCE_DIR}/../GlobalRep/dmrl_3/src/antenna/ethercat)
+set(ETHERCAT_DIR ${CMAKE_SOURCE_DIR}/../ethercat)
 include_directories(
     ${Boost_INCLUDE_DIRS}
     ${CMAKE_SOURCE_DIR}
