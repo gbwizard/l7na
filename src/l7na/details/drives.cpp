@@ -1056,22 +1056,6 @@ private:
 
         std::lock_guard<std::mutex> guard(m_mutex);
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-            if (sys.axes[axis].mode == OP_MODE_POINT) {
-                if ((sys.axes[axis].statusword & 0x7) == 0x7) {
-                    if (cycles_cmd_start[axis]) {
-                        LOG_DEBUG("Axis (" << axis << ") command data exchanged in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
-                        cycles_cmd_start[axis] = 0;
-                    }
-                } else if ((sys.axes[axis].statusword & 0x8) == 0x8) { // Fault occurred
-                    // Proceed to be able to reset fault
-                    cycles_cmd_start[axis] = 0;
-                } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
-                    // @todo Report error
-                    cycles_cmd_start[axis] = 0;
-                } else {
-                    continue;
-                }
-            }
 
             if(! m_tx_queues[axis].size()) {
                 continue;
@@ -1092,6 +1076,25 @@ private:
                 m_tx_queues[axis].clear();
                 cycles_cmd_start[axis] = 0;
                 continue;
+            }
+
+            if (sys.axes[axis].mode == OP_MODE_POINT || sys.axes[axis].mode == OP_MODE_SCAN) {
+                if ((sys.axes[axis].statusword & 0xF) == 0x7) {
+                    if (cycles_cmd_start[axis]) {
+                        LOG_DEBUG("Axis (" << axis << ") ready in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
+                        cycles_cmd_start[axis] = 0;
+                    }
+                } else if ((sys.axes[axis].statusword & 0xF) == 0x8) { // Fault occurred
+                    // Proceed to be able to reset fault
+                    cycles_cmd_start[axis] = 0;
+                } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
+                    // @todo Report error
+                    cycles_cmd_start[axis] = 0;
+                    LOG_WARN("Axis (" << axis << ") is still not ready in " << kMaxAxisReadyCycles << " cycles");
+                } else {
+                    // Ожидаем подтверждения от сервоусилителя подтверждения перехода в "Operation Enabled"
+                    continue;
+                }
             }
 
             TXCmd txcmd = m_tx_queues[axis].front();
