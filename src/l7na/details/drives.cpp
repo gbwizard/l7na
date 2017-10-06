@@ -359,6 +359,10 @@ protected:
         const MoveModeMap& axis_move_modes = m_move_modes[axis];
         const ParamsMode& axis_params_mode = m_params_mode[axis];
 
+        if (0x3 == (s.axes[axis].statusword & 0xF)) {
+            txcmd_list.push_back(kTxCmdIdle);
+        }
+
         if (vel) {
             /* Устанавливаем параметры для движения на постоянной скорости.
              * Для этого выбираем режим с максимальным значением.
@@ -515,14 +519,8 @@ protected:
             return false;
         }
 
-        TXCmd txcmd(TXCmd::kCmd);
-        txcmd.ctrlword = 0x6;
-        txcmd.op_mode = OP_MODE_IDLE;
-        txcmd.tgt_vel = 0;
-        txcmd.tgt_pos = 0;
-
         std::lock_guard<std::mutex> guard(m_mutex);
-        m_tx_queues[axis].push_back(txcmd);
+        m_tx_queues[axis].push_back(kTxCmdIdle);
 
         return true;
     }
@@ -537,23 +535,21 @@ protected:
             return false;
         }
 
-        // Set idle mode
-        TXCmd txcmd(TXCmd::kCmd);
-        txcmd.ctrlword = 0x6;
-        txcmd.op_mode = OP_MODE_IDLE;
-        txcmd.tgt_vel = 0;
-        txcmd.tgt_pos = 0;
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
 
-        std::lock_guard<std::mutex> guard(m_mutex);
-        m_tx_queues[axis].push_back(txcmd);
+            // Set idle mode
+            m_tx_queues[axis].push_back(kTxCmdIdle);
 
-        // Alarm/error reset
-        txcmd.ctrlword = 0x86;
-        txcmd.op_mode = OP_MODE_IDLE;
-        txcmd.tgt_vel = 0;
-        txcmd.tgt_pos = 0;
+            // Alarm/error reset
+            TXCmd txcmd(TXCmd::kCmd);
+            txcmd.ctrlword = 0x86;
+            txcmd.op_mode = OP_MODE_IDLE;
+            txcmd.tgt_vel = 0;
+            txcmd.tgt_pos = 0;
 
-        m_tx_queues[axis].push_back(txcmd);
+            m_tx_queues[axis].push_back(txcmd);
+        }
 
         return true;
     }
@@ -1084,7 +1080,7 @@ private:
                         LOG_DEBUG("Axis (" << axis << ") ready in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
                         cycles_cmd_start[axis] = 0;
                     }
-                } else if ((sys.axes[axis].statusword & 0xF) == 0x8) { // Fault occurred
+                } else if ((sys.axes[axis].statusword & 0x8) == 0x8) { // Fault occurred
                     // Proceed to be able to reset fault
                     cycles_cmd_start[axis] = 0;
                 } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
@@ -1362,6 +1358,17 @@ private:
     int32_t                         m_pos_abs_usr_off[AXIS_COUNT];
     int32_t                         m_pos_abs_rel_off[AXIS_COUNT];
 };
+
+constexpr uint64_t  Control::Impl::kMaxAxisReadyCycles;
+constexpr uint64_t  Control::Impl::kMaxDomainInitCycles;
+constexpr int32_t   Control::Impl::kPulsesPerTurn;
+constexpr int32_t   Control::Impl::kDegPerTurn;
+constexpr double    Control::Impl::kPulsesPerDegree;
+constexpr uint64_t  Control::Impl::kEpoch112000DiffNs;
+constexpr uint32_t  Control::Impl::kCmdQueueCapacity;
+constexpr uint32_t  Control::Impl::kCyclePeriodNs;
+constexpr uint32_t  Control::Impl::kRegPerDriveCount;
+constexpr MoveMode  Control::Impl::kMoveModeInvalid;
 
 Control::Control(const Config::Storage& config, const ParamsMode params_mode /*= PARAMS_MODE_AUTOMATIC*/)
     : m_pimpl(new Control::Impl(config, params_mode))
