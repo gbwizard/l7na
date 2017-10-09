@@ -9,7 +9,7 @@
 
 namespace Drives {
 
-//! @brief Индекс двигателя
+//! @brief Drive index
 enum Axis: int32_t {
     AXIS_NONE = -1,
 
@@ -21,20 +21,21 @@ enum Axis: int32_t {
     AXIS_COUNT
 };
 
-//! @brief Возможные состояния каждого двигателя
+//! @brief Possible status of a drive - CiA402 state machine states
 enum AxisState : int32_t {
-    AXIS_OFF = -1,                  //!< Выключен (до вызова Init или после вызова Release)
-    AXIS_INIT,                      //!< Инициализируется
-    AXIS_IDLE,                      //!< Включен, готов к работе
-    AXIS_SCAN,                      //!< Работает в режиме "Сканирование"
-    AXIS_POINT,                     //!< Работает в режиме "Установка в точку"
-    AXIS_ERROR                      //!< Состояние ошибки
+    AXIS_DISABLED = 0,              //!< Switch on Disabled (Considered as turned off)
+    AXIS_INIT,                      //!< Ready to switch on
+    AXIS_IDLE,                      //!< Switched on
+    AXIS_ENABLED,                   //!< Operation enabled
+    AXIS_STOP,                      //!< Quick Stop
+    AXIS_WARNING,                    //!< Warning occured
+    AXIS_ERROR                      //!< Fault occurted
 };
 
-//! @brief Режим установки параметров осей
+//! @brief Mode of drive params setup
 enum ParamsMode : int16_t {
-    PARAMS_MODE_AUTOMATIC,
-    PARAMS_MODE_MANUAL
+    PARAMS_MODE_AUTOMATIC,  //!< Before accompilishing any move command we automatically setup drive parameters for the specified move
+    PARAMS_MODE_MANUAL      //!< No changes to drives parameters are made
 };
 
 /*! @brief Режим движения, соответствующий определенному набору параметров оси.
@@ -78,13 +79,15 @@ struct AxisStatus {
 
 enum SystemState : int32_t {
     SYSTEM_OFF = -1,
-    SYSTEM_OK = 0,
     SYSTEM_INIT,
+    SYSTEM_READY,
+    SYSTEM_PROCESSING,
+    SYSTEM_WARNING,
     SYSTEM_ERROR,
     SYSTEM_FATAL_ERROR,
 };
 
-//! @brief Текущие значения, возвращаемые системой управления
+//! @brief Current system status
 struct SystemStatus {
     SystemStatus() noexcept;
 

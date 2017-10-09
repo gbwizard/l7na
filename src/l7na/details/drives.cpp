@@ -27,9 +27,9 @@
 #include "axisparams.h"
 
 /*! @todo
- *  1. Failed to get reference clock time
- *  2. Контролировать выставление параметров оси.
- *  3. Приоритет команды SetModeIdle
+ *  1. DONE - Failed to get reference clock time
+ *  2. Check drive parameters setting
+ *  3. DONE - Stop/Disable priority
  *  4. Controlword/Statusword - pretty print.
  */
 
@@ -37,7 +37,8 @@ namespace Drives {
 
 namespace fs = boost::filesystem;
 
-typedef boost::chrono::system_clock SysClock;
+using SysClock = boost::chrono::system_clock;
+using TimePoint = SysClock::time_point;
 
 DECLARE_EXCEPTION(Exception, common::Exception);
 DECLARE_EXCEPTION(TestFailedException, common::Exception);
@@ -45,8 +46,54 @@ DECLARE_EXCEPTION(TestFailedException, common::Exception);
 namespace {
 
 const size_t gkTempSensorsCount = 3;
+const uint64_t gkTempSensorsReadPeriodCycles = 1000;
 
 } // namespaces
+
+std::string GetSystemStateName(const SystemState& ss) {
+    if (SYSTEM_OFF == ss) {
+        return "off";
+    } else if (SYSTEM_INIT == ss) {
+        return "init";
+    } else if (SYSTEM_READY == ss) {
+        return "ready";
+    } else if (SYSTEM_PROCESSING == ss) {
+        return "processing";
+    } else if (SYSTEM_WARNING == ss) {
+        return "warning";
+    } else if (SYSTEM_ERROR == ss) {
+        return "error";
+    } else if (SYSTEM_FATAL_ERROR == ss) {
+        return "fatal";
+    }
+
+    LOG_ERROR("GetSystemStateName(): unknown system state '" << ss << "'");
+
+    return "unknown";
+}
+
+
+std::string GetAxisStateName(const AxisState& as) {
+    if (AXIS_DISABLED == as) {
+        return "disabled";
+    } else if (AXIS_INIT == as) {
+        return "init";
+    } else if (AXIS_IDLE == as) {
+        return "idle";
+    } else if (AXIS_ENABLED == as) {
+        return "enabled";
+    } else if (AXIS_STOP == as) {
+        return "stop";
+    } else if (AXIS_WARNING == as) {
+        return "warning";
+    } else if (AXIS_ERROR == as) {
+        return "error";
+    }
+
+    LOG_ERROR("GetAxisStateName(): unknown axis state '" << as << "'");
+
+    return "unknown";
+}
 
 AxisStatus::AxisStatus()
     : tgt_pos_deg(0.0)
@@ -63,7 +110,7 @@ AxisStatus::AxisStatus()
     , dmd_vel(0)
     , tgt_vel(0)
     , cur_torq(0)
-    , state(AxisState::AXIS_OFF)
+    , state(AxisState::AXIS_DISABLED)
     , error_code(0)
     , cur_temperature0(0)
     , cur_temperature1(0)
@@ -72,10 +119,6 @@ AxisStatus::AxisStatus()
     , statusword(0)
     , mode(0)
 {}
-
-bool AxisStatus::IsReady() const {
-    return state == AxisState::AXIS_IDLE || state == AxisState::AXIS_SCAN || state == AxisState::AXIS_POINT || state == AxisState::AXIS_ERROR;
-}
 
 SystemStatus::SystemStatus() noexcept
     : state(SystemState::SYSTEM_OFF)
@@ -124,6 +167,7 @@ protected:
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             m_params_mode[axis] = params_mode;
             m_cur_move_mode[axis] = kMoveModeInvalid;
+            m_tx_queues[axis].push_back(kTxCmdInit);
             m_tx_queues[axis].push_back(kTxCmdIdle);
         }
 
@@ -287,7 +331,7 @@ protected:
             }
 
             // Записываем начальное application time
-            supply_app_time();
+            ecrt_master_application_time(m_master, get_app_time());
 
             ///////////////////////////////////////////////////////////////////
 
@@ -304,6 +348,11 @@ protected:
 
             LOG_INFO("Domain data registered");
 
+            // Setup system status value
+            SystemStatus s;
+            s.state = SystemState::SYSTEM_INIT;
+            m_sys_status.store(s);
+
             m_thread.reset(new std::thread(std::bind(&Impl::CyclicPolling, this)));
             sched_param param{5};
             const int ret = ::pthread_setschedparam(m_thread->native_handle(), SCHED_RR, &param);
@@ -314,13 +363,6 @@ protected:
             }
 
             LOG_INFO("Cyclic polling thread started");
-
-            // Записываем состояние системы
-            SystemStatus s;
-            s.state = SystemState::SYSTEM_INIT;
-            s.axes[AZIMUTH_AXIS].state = AxisState::AXIS_INIT;
-            s.axes[ELEVATION_AXIS].state = AxisState::AXIS_INIT;
-            m_sys_status.store(s);
         } catch (const std::exception& ex) {
             LOG_ERROR(ex.what());
 
@@ -344,24 +386,25 @@ protected:
     }
 
     bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/sec*/) {
-        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
-        if (! is_system_ready(s)) {
-            return false;
-        }
-
         if (! is_axis_valid(axis)) {
             return false;
         }
 
         std::list<TXCmd> txcmd_list;
+
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
+
+        if (AXIS_DISABLED == s.axes[axis].state) {
+            txcmd_list.push_back(kTxCmdInit);
+            txcmd_list.push_back(kTxCmdIdle);
+        } else if (AXIS_INIT == s.axes[axis].state) {
+            txcmd_list.push_back(kTxCmdIdle);
+        }
+
         MoveMode& axis_cur_move_mode = m_cur_move_mode[axis];
         const MoveMode axis_old_move_mode = m_cur_move_mode[axis];
         const MoveModeMap& axis_move_modes = m_move_modes[axis];
         const ParamsMode& axis_params_mode = m_params_mode[axis];
-
-        if (0x3 == (s.axes[axis].statusword & 0xF)) {
-            txcmd_list.push_back(kTxCmdIdle);
-        }
 
         if (vel) {
             /* Устанавливаем параметры для движения на постоянной скорости.
@@ -455,8 +498,11 @@ protected:
             return false;
         }
 
-        std::lock_guard<std::mutex> guard(m_mutex);
-        m_move_modes[axis][mode] = params;
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            m_move_modes[axis][mode] = params;
+        }
+
         return true;
     }
 
@@ -465,8 +511,11 @@ protected:
             return false;
         }
 
-        std::lock_guard<std::mutex> guard(m_mutex);
-        m_params_mode[axis] = params_mode;
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            m_params_mode[axis] = params_mode;
+        }
+
         return true;
     }
 
@@ -474,16 +523,13 @@ protected:
         if (! is_axis_valid(axis)) {
             return false;
         }
+
         params_mode = m_params_mode[axis];
+
         return true;
     }
 
     bool SetAxisParams(const Axis& axis, const AxisParams& params) {
-        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
-        if (! is_system_ready(s)) {
-            return false;
-        }
-
         if (! is_axis_valid(axis)) {
             return false;
         }
@@ -499,56 +545,121 @@ protected:
 
         TXCmd txcmd(TXCmd::kSetParams);
 
-        std::lock_guard<std::mutex> guard(m_mutex);
-        for (const AxisParam& p: params) {
-            txcmd.param = p;
-            m_tx_queues[axis].push_back(txcmd);
-            m_cur_params[axis][p.index] = p.value;
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            for (const AxisParam& p: params) {
+                txcmd.param = p;
+                m_tx_queues[axis].push_back(txcmd);
+                m_cur_params[axis][p.index] = p.value;
+            }
         }
 
         return true;
     }
 
-    bool SetModeIdle(const Axis& axis) {
-        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
-        if (! is_system_ready(s)) {
-            return false;
-        }
+    bool IsOperational() const {
+        std::lock_guard<std::mutex> guard(m_mutex);
+        return is_system_ready();
+    }
 
+    bool Enable(const Axis& axis) {
         if (! is_axis_valid(axis)) {
             return false;
         }
 
-        std::lock_guard<std::mutex> guard(m_mutex);
-        m_tx_queues[axis].push_back(kTxCmdIdle);
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
+
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            if (AXIS_DISABLED == s.axes[axis].state) {
+                m_tx_queues[axis].push_back(kTxCmdInit);
+                m_tx_queues[axis].push_back(kTxCmdEnable);
+            } else if (AXIS_INIT == s.axes[axis].state || AXIS_IDLE == s.axes[axis].state || AXIS_STOP == s.axes[axis].state) {
+                m_tx_queues[axis].push_back(kTxCmdEnable);
+            } else if (AXIS_ENABLED == s.axes[axis].state) {
+                LOG_INFO("Drive " << axis << " is in enabled state. Skip enable cmd");
+            } else {
+                LOG_ERROR("Can't enable drive " << axis << " from state '" << GetAxisStateName(s.axes[axis].state) << "'");
+                return false;
+            }
+        }
 
         return true;
     }
 
-    bool ResetFault(const Axis& axis) {
-        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
-        if (! is_system_ready(s)) {
-            return false;
-        }
-
+    bool Disable(const Axis& axis) {
         if (! is_axis_valid(axis)) {
             return false;
         }
 
         {
             std::lock_guard<std::mutex> guard(m_mutex);
+            m_tx_emerg_queues[axis].push_back(kTxCmdDisable);
+        }
 
-            // Set idle mode
-            m_tx_queues[axis].push_back(kTxCmdIdle);
+        return true;
+    }
 
-            // Alarm/error reset
+    bool Stop(const Axis& axis) {
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
+        const AxisStatus& a = s.axes[axis];
+        {
             TXCmd txcmd(TXCmd::kCmd);
-            txcmd.ctrlword = 0x86;
-            txcmd.op_mode = OP_MODE_IDLE;
-            txcmd.tgt_vel = 0;
-            txcmd.tgt_pos = 0;
 
-            m_tx_queues[axis].push_back(txcmd);
+            // Clear 2bit and set 1bit
+            txcmd.ctrlword = (a.ctrlword & ~0x4) | 0x2;
+            txcmd.op_mode = OperationMode(a.mode);
+            txcmd.tgt_pos = 0.0;
+            txcmd.tgt_vel = 0.0;
+
+            std::lock_guard<std::mutex> guard(m_mutex);
+            m_tx_emerg_queues[axis].push_back(txcmd);
+        }
+
+        return true;
+    }
+
+    bool Idle(const Axis& axis) {
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        const SystemStatus s = m_sys_status.load(std::memory_order_acquire);
+
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            if (AXIS_DISABLED == s.axes[axis].state) {
+                m_tx_queues[axis].push_back(kTxCmdInit);
+                m_tx_queues[axis].push_back(kTxCmdIdle);
+            } else if (AXIS_INIT == s.axes[axis].state || AXIS_ENABLED == s.axes[axis].state) {
+                m_tx_queues[axis].push_back(kTxCmdIdle);
+            } else if (AXIS_STOP == s.axes[axis].state) {
+                m_tx_queues[axis].push_back(kTxCmdEnable);
+                m_tx_queues[axis].push_back(kTxCmdIdle);
+            } else if (AXIS_IDLE == s.axes[axis].state) {
+                LOG_INFO("Drive " << axis << " is in idle state. Skip idle cmd");
+            } else {
+                LOG_ERROR("Can't enable drive " << axis << " from state '" << GetAxisStateName(s.axes[axis].state) << "'");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool ResetFault(const Axis& axis) {
+        if (! is_axis_valid(axis)) {
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            m_tx_queues[axis].push_back(kTxCmdResetError);
+
         }
 
         return true;
@@ -603,146 +714,38 @@ protected:
     }
 
     void CyclicPolling() {
-        bool op_state = false;
-        uint64_t cycles_total = 0;
-
-        SysClock::time_point wakeup_time = SysClock::now();
-
-        while (! op_state && ! m_stop_flag.load(std::memory_order_consume)) {
-            wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
-            boost::this_thread::sleep_until(wakeup_time);
-
-            // Получаем данные от подчиненных
-            ecrt_master_receive(m_master);
-            ecrt_domain_process(m_domain);
-
-            ++cycles_total;
-
-            // Получаем статус домена
-            ecrt_domain_state(m_domain, &m_domain_state);
-
-            // Получаем статус подчиненных
-            ec_slave_config_state_t slave_cfg_state[AXIS_COUNT];
-            for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
-                ecrt_slave_config_state(m_slave_cfg[d], &slave_cfg_state[d]);
-            }
-
-            bool all_slaves_up = true;
-            for (uint32_t d = 0; d < AXIS_COUNT; ++d) {
-                all_slaves_up |= slave_cfg_state[d].operational;
-            }
-
-            if (m_domain_state.wc_state == EC_WC_COMPLETE && all_slaves_up) {
-                LOG_INFO("Domain is up at " << cycles_total << " cycles");
-                op_state = true;
-            } else if (cycles_total % 10000 == 0) {
-                //! @todo выход из цикла и сообщение об ошибке
-                LOG_WARN("Domain is NOT up at " << cycles_total << " cycles. Domain state=" << m_domain_state.wc_state
-                         << ", slave0 state=" << uint32_t(slave_cfg_state[0].al_state)
-                         << ", slave1 state=" << uint32_t(slave_cfg_state[1].al_state)
-                         );
-            }
-
-            // Добавляем команды на синхронизацию времени
-            supply_app_time();
-            ecrt_master_sync_reference_clock(m_master);
-            ecrt_master_sync_slave_clocks(m_master);
-            ecrt_master_sync_monitor_queue(m_master);
-
-            // Send queued data
-            ecrt_domain_queue(m_domain);     // Помечаем данные как готовые к отправке
-            ecrt_master_send(m_master);      // Отправляем все датаграммы, помещенные в очередь
-        }
-
-        // Устанавливаем статус системы в IDLE
-        SystemStatus s = m_sys_status.load(std::memory_order_acquire);
-        s.state = SystemState::SYSTEM_OK;
-        s.axes[AZIMUTH_AXIS].state = AxisState::AXIS_IDLE;
-        s.axes[ELEVATION_AXIS].state = AxisState::AXIS_IDLE;
-        m_sys_status.store(s);
-
-        cycles_total = 0;
-        SysClock::time_point last_start_time = {}, start_time = {}, end_time = {};
-
+        uint64_t cycles_num = 0;
+        TimePoint wakeup_time = SysClock::now(), last_start_time = {}, start_time = {}, end_time = {};
         while (! m_stop_flag.load(std::memory_order_consume)) {
             end_time = SysClock::now();
             wakeup_time += boost::chrono::nanoseconds(kCyclePeriodNs);
             boost::this_thread::sleep_until(wakeup_time);
-
-            // Cycle time info gathering
-            CycleTimeInfo timing_info = m_timing_info.load(std::memory_order_consume);
             start_time = SysClock::now();
-            timing_info.latency_ns = (start_time - wakeup_time).count();
-            timing_info.period_ns = (start_time - last_start_time).count();
-            timing_info.exec_ns = (end_time - last_start_time).count();
+
+            update_cycle_timings(wakeup_time, last_start_time, start_time, end_time);
             last_start_time = start_time;
 
-            if (timing_info.latency_ns > timing_info.latency_max_ns) {
-                timing_info.latency_max_ns = timing_info.latency_ns;
-            }
-            if (timing_info.latency_ns < timing_info.latency_min_ns) {
-                timing_info.latency_min_ns = timing_info.latency_ns;
-            }
-            if (timing_info.period_ns > timing_info.period_max_ns) {
-                timing_info.period_max_ns = timing_info.period_ns;
-            }
-            if (timing_info.period_ns < timing_info.period_min_ns) {
-                timing_info.period_min_ns = timing_info.period_ns;
-            }
-            if (timing_info.exec_ns > timing_info.exec_max_ns) {
-                timing_info.exec_max_ns = timing_info.exec_ns;
-            }
-            if (timing_info.exec_ns < timing_info.exec_min_ns) {
-                timing_info.exec_min_ns = timing_info.exec_ns;
-            }
-            m_timing_info.store(timing_info);
+            receive_datagrams();
 
-            // Получаем данные от подчиненных
-            ecrt_master_receive(m_master);
-            ecrt_domain_process(m_domain);
+            SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
+            read_states(sys);
+            process_pdo_data(sys);
+            process_sdo_data(sys, cycles_num);
+            m_sys_status.store(sys, std::memory_order_relaxed);
 
-            // Получаем статус домена
-            ecrt_domain_state(m_domain, &m_domain_state);
-
-            // Получаем верхнюю оценку синхронизации
-            const uint32_t dcsync = ecrt_master_sync_monitor_process(m_master);
-
-            // Получаем значение референсных часов
-            uint32_t lo_ref_time = 0;
-            const int err = ecrt_master_reference_clock_time(m_master, &lo_ref_time);
-            if (err) {
-                // SystemStatus s = m_sys_status.load(std::memory_order_acquire);
-                // s.state = SystemState::SYSTEM_ERROR;
-                // m_sys_status.store(s);
-                // @todo save error code
+            prepare_emerg_cmds();
+            if (is_system_ready()) {
+                prepare_cmds();
             }
 
-            const uint64_t app_time = get_app_time();
-            const uint64_t ref_time = (app_time & 0xFFFFFFFF00000000UL) | lo_ref_time;
+            sync_time();
 
-            // Обрабатываем пришедшие данные
-            const SystemStatus s = process_received_data(cycles_total, app_time, ref_time, dcsync);
+            send_datagrams();
 
-            // Если есть новые команды - передаем их подчиненным
-            prepare_new_commands(s);
-
-            // Устанавливаем application-time
-            supply_app_time();
-            // Добавляем команды на синхронизацию времени
-            ecrt_master_sync_reference_clock(m_master);
-            ecrt_master_sync_slave_clocks(m_master);
-            // ВАЖНО: Кладет в очередь отправки запрос на получение от дочерних узлов значение регистра их оффсета от SystemTime.
-            ecrt_master_sync_monitor_queue(m_master);
-
-            // Отправляем данные подчиненным
-            ecrt_domain_queue(m_domain);
-            ecrt_master_send(m_master);
-
-            ++cycles_total;
+            ++cycles_num;
         }
 
-        ecrt_master_receive(m_master);
-        ecrt_domain_process(m_domain);
+        receive_datagrams();
     }
 
 private:
@@ -781,16 +784,6 @@ private:
         }
 
         m_sys_info = sysinfo;
-
-        return true;
-    }
-
-    bool is_system_ready(const SystemStatus& s) const {
-        for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-            if (! s.axes[axis].IsReady()) {
-                return false;
-            }
-        }
 
         return true;
     }
@@ -880,11 +873,6 @@ private:
         return since_1_1_2000_ns;
     }
 
-    void supply_app_time() {
-        const uint64_t app_time = get_app_time();
-        ecrt_master_application_time(m_master, app_time);
-    }
-
     bool create_sdo_requests() {
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Temperature
@@ -967,9 +955,107 @@ private:
         }
     }
 
-    SystemStatus process_received_data(uint64_t cycle_num, uint64_t apptime, uint64_t reftime, uint32_t dcsync) {
-        SystemStatus sys = m_sys_status.load(std::memory_order_acquire);
+    AxisState compute_axis_state(uint16_t statusword) {
+        if ((statusword & 0xF) == 0x8) {
+            return AXIS_ERROR;
+        } else if ((statusword & 0x80) == 0x80) {
+            return AXIS_WARNING;
+        } else if ((statusword & 0x6F) == 0x7) {
+            return AXIS_STOP;
+        } else if ((statusword & 0x6F) == 0x27) {
+            return AXIS_ENABLED;
+        } else if ((statusword & 0x6F) == 0x23) {
+            return AXIS_IDLE;
+        } else if ((statusword & 0x6F) == 0x21) {
+            return AXIS_INIT;
+        } else if ((statusword & 0x4F) == 0x0 || (statusword & 0x4F) == 0x40) {
+            return AXIS_DISABLED;
+        }
 
+        LOG_ERROR("Unknown axis stasusword: 0x" << std::hex << statusword);
+
+        return AXIS_ERROR;
+    }
+
+    void update_cycle_timings(const TimePoint& wakeup_time, const TimePoint& last_start_time
+                              , const TimePoint& start_time, const TimePoint& end_time) {
+        // Gather cycle time info
+        CycleTimeInfo timing_info = m_timing_info.load(std::memory_order_consume);
+        timing_info.latency_ns = (start_time - wakeup_time).count();
+        timing_info.period_ns = (start_time - last_start_time).count();
+        timing_info.exec_ns = (end_time - last_start_time).count();
+
+        if (timing_info.latency_ns > timing_info.latency_max_ns) {
+            timing_info.latency_max_ns = timing_info.latency_ns;
+        }
+        if (timing_info.latency_ns < timing_info.latency_min_ns) {
+            timing_info.latency_min_ns = timing_info.latency_ns;
+        }
+        if (timing_info.period_ns > timing_info.period_max_ns) {
+            timing_info.period_max_ns = timing_info.period_ns;
+        }
+        if (timing_info.period_ns < timing_info.period_min_ns) {
+            timing_info.period_min_ns = timing_info.period_ns;
+        }
+        if (timing_info.exec_ns > timing_info.exec_max_ns) {
+            timing_info.exec_max_ns = timing_info.exec_ns;
+        }
+        if (timing_info.exec_ns < timing_info.exec_min_ns) {
+            timing_info.exec_min_ns = timing_info.exec_ns;
+        }
+        m_timing_info.store(timing_info);
+    }
+
+    void receive_datagrams() {
+        // Fetches received frames from the hardware and processes the datagrams
+        ecrt_master_receive(m_master);
+        ecrt_domain_process(m_domain);
+    }
+
+    void read_states(SystemStatus& sys) {
+        ec_master_state_t ms;
+        ecrt_master_state(m_master, &ms);
+        if (ms.slaves_responding != m_master_state.slaves_responding) {
+            LOG_INFO("Master: slaves responding " << m_master_state.slaves_responding << " -> " << ms.slaves_responding);
+        }
+        m_master_state = ms;
+
+        ec_domain_state_t ds;
+        ecrt_domain_state(m_domain, &ds);
+        if (ds.wc_state != m_domain_state.wc_state) {
+            LOG_DEBUG("Domain: WC state " << domain_wc_name(m_domain_state.wc_state) << " -> " << domain_wc_name(ds.wc_state));
+        }
+        if (ds.wc_state == EC_WC_COMPLETE) {
+            sys.state = SYSTEM_READY;
+        } else /* if (ds.wc_state == EC_WC_INCOMPLETE)*/ {
+            sys.state = SYSTEM_PROCESSING;
+        }
+        m_domain_state = ds;
+
+        ec_slave_config_state_t scs[AXIS_COUNT];
+        for (int32_t aidx = AXIS_MIN; aidx < AXIS_COUNT; ++aidx) {
+            ecrt_slave_config_state(m_slave_cfg[aidx], &scs[aidx]);
+            if (scs[aidx].online != m_slave_cfg_states[aidx].online) {
+                LOG_INFO("Slave " << aidx <<  ": online " << uint32_t(m_slave_cfg_states[aidx].online) << " -> " << uint32_t(scs[aidx].online));
+            }
+            if (scs[aidx].operational != m_slave_cfg_states[aidx].operational) {
+                LOG_INFO("Slave " << aidx << ": operational " << uint32_t(m_slave_cfg_states[aidx].operational) << " -> " << uint32_t(scs[aidx].operational));
+            }
+            m_slave_cfg_states[aidx] = scs[aidx];
+        }
+    }
+
+    std::string domain_wc_name(const ec_wc_state_t& wcs) {
+        if (wcs == EC_WC_INCOMPLETE) {
+            return "incomplete";
+        } else if (wcs == EC_WC_COMPLETE) {
+            return "ready";
+        }
+
+        return "zero";
+    }
+
+    void process_pdo_data(SystemStatus& sys) {
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
             // Читаем данные PDO для двигателя c индексом axis
             sys.axes[axis].cur_pos = EC_READ_S32(m_domain_data + m_offro_act_pos[axis]);
@@ -990,135 +1076,157 @@ private:
             sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
             sys.axes[axis].statusword = EC_READ_U16(m_domain_data + m_offro_status[axis]);
             sys.axes[axis].mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[axis]);
-            if (sys.axes[axis].mode == OP_MODE_POINT) {
-                sys.axes[axis].state = AxisState::AXIS_POINT;
-            } else if (sys.axes[axis].mode == OP_MODE_SCAN) {
-                sys.axes[axis].state = AxisState::AXIS_SCAN;
-            } else if (sys.axes[axis].mode == OP_MODE_IDLE) {
-                sys.axes[axis].state = AxisState::AXIS_IDLE;
-            } else {
-                sys.axes[axis].state = AxisState::AXIS_ERROR;
-            }
-            sys.axes[axis].error_code = EC_READ_U16(m_domain_data + m_offro_err_code[axis]);
-            if (sys.axes[axis].error_code) {
-                sys.axes[axis].state = AxisState::AXIS_ERROR;
-            }
 
-            // Читаем данные sdo
-            for (size_t i = 0; i < gkTempSensorsCount; ++i) {
-                const ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis][i]);
-                if (sdo_req_state == EC_REQUEST_SUCCESS) {
-                    sys.axes[axis].cur_temperature0 = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis][i]));
-                    // @todo Вынести в настройки
-                    if (cycle_num % 10000 == 0) {
-                        ecrt_sdo_request_read(m_temperature_sdo[axis][i]);
-                    }
-                } else if (sdo_req_state == EC_REQUEST_UNUSED) {
-                    ecrt_sdo_request_read(m_temperature_sdo[axis][i]);
-                }
-            }
+            sys.axes[axis].state = compute_axis_state(sys.axes[axis].statusword);
+            sys.axes[axis].error_code = EC_READ_U16(m_domain_data + m_offro_err_code[axis]);
 
             // Отладочные данные
             sys.axes[axis].params_mode = m_params_mode[axis];
             sys.axes[axis].move_mode = m_cur_move_mode[axis];
         }
 
+        // Upper estimation of the maximum time difference in ns
+        const uint32_t dcsync = ecrt_master_sync_monitor_process(m_master);
+
+        // Get reference clock time
+        uint32_t lo_reftime = 0;
+        const int ret = ecrt_master_reference_clock_time(m_master, &lo_reftime);
+        if (ret) {
+            if (ret == -EIO) {
+                LOG_WARN("Slave sync datagram wasn't received");
+            } else if (ret == -ENXIO) {
+                LOG_WARN("No reference clock found");
+            }
+            // SystemStatus s = m_sys_status.load(std::memory_order_acquire);
+            // s.state = SystemState::SYSTEM_WARNING;
+            // m_sys_status.store(s);
+            // @todo save error code
+        }
+
+        const uint64_t apptime = get_app_time();
+        const uint64_t reftime = (apptime & 0xFFFFFFFF00000000UL) | lo_reftime;
+
         sys.reftime = reftime + kEpoch112000DiffNs;
         sys.apptime = apptime + kEpoch112000DiffNs;
         sys.dcsync = dcsync;
 
-        const bool any_axis_error = std::any_of(std::begin(sys.axes), std::end(sys.axes), [](const AxisStatus& axis) {
-            return AxisState::AXIS_ERROR == axis.state;
-        });
-        if (! any_axis_error) {
-            sys.state = SystemState::SYSTEM_OK;
-        } else {
-            sys.state = SystemState::SYSTEM_ERROR;
+        for (int32_t aidx = AXIS_MIN; aidx < AXIS_COUNT; ++aidx) {
+            AxisStatus& axis = sys.axes[aidx];
+            if (axis.state == AXIS_ERROR || axis.error_code) {
+                sys.state = SystemState::SYSTEM_ERROR;
+                break;
+            } else if (axis.state == AXIS_WARNING) {
+                sys.state = SystemState::SYSTEM_WARNING;
+                break;
+            }
         }
-
-        m_sys_status.store(sys, std::memory_order_relaxed);
-
-        return sys;
     }
 
-    // @todo Записывать все команды для каждой оси в одну датаграмму
-    // Условием для "разрешения" работы с осью является
-    // 1) Нет ошибки по оси
-    // 2) Статус содержит флаг, что предыдущая команда принята прихода в точку принята.
-    // 3) Все SDO-запросы находятся НЕ в состоянии BUSY.
-    void prepare_new_commands(const SystemStatus& sys) {
-        static uint64_t cycles_cur = 0;                         // Номер текущего цикла в рамках работы
-        static uint64_t cycles_cmd_start[AXIS_COUNT] = {0};     // Номер цикла начала ожидания исполнения команды
-
-        std::lock_guard<std::mutex> guard(m_mutex);
+    void process_sdo_data(SystemStatus& sys, uint64_t cycle_num) {
         for (int32_t axis = AXIS_MIN; axis < AXIS_COUNT; ++axis) {
-
-            if(! m_tx_queues[axis].size()) {
-                continue;
-            }
-
-            // If idle command queued - give it the highest priority
-            bool flush_queue = false;
-            for (const TXCmd& txcmd: m_tx_queues[axis]) {
-                if (txcmd.type == TXCmd::kCmd && txcmd.op_mode == OP_MODE_IDLE) {
-                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
-                    m_cur_move_mode[axis] = kMoveModeInvalid;
-                    flush_queue = true;
-                }
-            }
-            if (flush_queue) {
-                // Remove all commands from queue
-                m_tx_queues[axis].clear();
-                cycles_cmd_start[axis] = 0;
-                continue;
-            }
-
-            if (sys.axes[axis].mode == OP_MODE_POINT || sys.axes[axis].mode == OP_MODE_SCAN) {
-                if ((sys.axes[axis].statusword & 0xF) == 0x7) {
-                    if (cycles_cmd_start[axis]) {
-                        LOG_DEBUG("Axis (" << axis << ") ready in " << cycles_cur - cycles_cmd_start[axis] << " cycles");
-                        cycles_cmd_start[axis] = 0;
+            for (size_t i = 0; i < gkTempSensorsCount; ++i) {
+                const ec_request_state_t sdo_req_state = ecrt_sdo_request_state(m_temperature_sdo[axis][i]);
+                if (sdo_req_state == EC_REQUEST_SUCCESS) {
+                    sys.axes[axis].cur_temperature0 = EC_READ_S16(ecrt_sdo_request_data(m_temperature_sdo[axis][i]));
+                    // @todo Вынести в настройки
+                    if (cycle_num % gkTempSensorsReadPeriodCycles == 0) {
+                        ecrt_sdo_request_read(m_temperature_sdo[axis][i]);
                     }
-                } else if ((sys.axes[axis].statusword & 0x8) == 0x8) { // Fault occurred
-                    // Proceed to be able to reset fault
-                    cycles_cmd_start[axis] = 0;
-                } else if (cycles_cmd_start[axis] && (cycles_cur - cycles_cmd_start[axis] > kMaxAxisReadyCycles)) {
-                    // @todo Report error
-                    cycles_cmd_start[axis] = 0;
-                    LOG_WARN("Axis (" << axis << ") is still not ready in " << kMaxAxisReadyCycles << " cycles");
-                } else {
-                    // Ожидаем подтверждения от сервоусилителя подтверждения перехода в "Operation Enabled"
-                    continue;
+                } else if (sdo_req_state == EC_REQUEST_UNUSED) {
+                    ecrt_sdo_request_read(m_temperature_sdo[axis][i]);
+                }
+            }
+        }
+    }
+
+    bool is_system_ready() const {
+        bool all_slaves_op = true;
+        for (uint32_t aidx = 0; aidx < AXIS_COUNT; ++aidx) {
+            all_slaves_op |= m_slave_cfg_states[aidx].operational;
+        }
+
+        return all_slaves_op && m_domain_state.wc_state == EC_WC_COMPLETE;
+    }
+
+    void prepare_emerg_cmds() {
+        std::lock_guard<std::mutex> guard(m_mutex);
+
+        auto queue_emerg_cmd = [this](int32_t aidx, const TXCmd& txcmd) {
+            EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[aidx], txcmd.op_mode);
+            EC_WRITE_U16(m_domain_data + m_offrw_ctrl[aidx],     txcmd.ctrlword);
+        };
+
+        for (int32_t aidx = AXIS_MIN; aidx < AXIS_COUNT; ++aidx) {
+            const std::list<TXCmd>& queue = m_tx_emerg_queues[aidx];
+
+            if(! queue.size()) {
+                continue;
+            }
+
+            bool emerg_cmd_found = false;
+            // Search for disable cmd
+            for (const TXCmd& txcmd: queue) {
+                if (kTxCmdDisable.ctrlword == txcmd.ctrlword) {
+                    queue_emerg_cmd(aidx, txcmd);
+                    emerg_cmd_found = true;
+                    break;
                 }
             }
 
-            TXCmd txcmd = m_tx_queues[axis].front();
-            if (TXCmd::kCmd == txcmd.type) {
-                if (txcmd.op_mode == OP_MODE_IDLE) {
-                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
-                } else if (txcmd.op_mode == OP_MODE_POINT) {
-                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[axis],  txcmd.tgt_pos);
-
-                    cycles_cmd_start[axis] = cycles_cur;
-                } else if (txcmd.op_mode == OP_MODE_SCAN) {
-                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[axis], txcmd.op_mode);
-                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[axis],     txcmd.ctrlword);
-                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[axis],  txcmd.tgt_vel);
+            if (! emerg_cmd_found) {
+                // Search for stop cmd
+                for (const TXCmd& txcmd: queue) {
+                    if (! (txcmd.ctrlword & 0x4) && (txcmd.ctrlword & 0x2)) {
+                        queue_emerg_cmd(aidx, txcmd);
+                        emerg_cmd_found = true;
+                        break;
+                    }
                 }
-                // Удаляем команду из очереди
-                m_tx_queues[axis].pop_front();
+            }
+
+            if (emerg_cmd_found) {
+                // Remove all commands from all queues
+                m_tx_emerg_queues[aidx].clear();
+                m_tx_queues[aidx].clear();
+                m_cur_move_mode[aidx] = kMoveModeInvalid;
+                continue;
+            }
+        }
+    }
+
+    void prepare_cmds() {
+        std::lock_guard<std::mutex> guard(m_mutex);
+        for (int32_t aidx = AXIS_MIN; aidx < AXIS_COUNT; ++aidx) {
+            std::list<TXCmd>& queue = m_tx_queues[aidx];
+
+            if(! queue.size()) {
+                continue;
+            }
+
+            // One command at a time
+            TXCmd txcmd = queue.front();
+            if (TXCmd::kCmd == txcmd.type) {
+                if (txcmd.op_mode == OP_MODE_NOT_SET) {
+                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[aidx], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[aidx],     txcmd.ctrlword);
+                } else if (txcmd.op_mode == OP_MODE_POINT) {
+                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[aidx], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[aidx],     txcmd.ctrlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_pos[aidx],  txcmd.tgt_pos);
+                } else if (txcmd.op_mode == OP_MODE_SCAN) {
+                    EC_WRITE_U8 (m_domain_data + m_offrw_act_mode[aidx], txcmd.op_mode);
+                    EC_WRITE_U16(m_domain_data + m_offrw_ctrl[aidx],     txcmd.ctrlword);
+                    EC_WRITE_S32(m_domain_data + m_offrw_tgt_vel[aidx],  txcmd.tgt_vel);
+                }
+                // Remove last command from queue
+                queue.pop_front();
             } else if (TXCmd::kSetParams == txcmd.type) {
                 bool axis_params_set = false;
-                std::map<uint16_t, ec_sdo_request*>& axis_write_sdos = m_write_sdos[axis];
+                std::map<uint16_t, ec_sdo_request*>& axis_write_sdos = m_write_sdos[aidx];
 
-                //! @todo Контролировать выставление параметров осей
-                //! @todo Транзакционность выставления параметров осей
+                //! @todo Сheck if all of them have been applied from current params set
                 while(true) {
-                    // Такой индекс точно должен быть в мапе, мы ранее это проверяли
+                    // This index MUST be there. We've checked it earlier
                     ec_sdo_request* sdo_req = axis_write_sdos.at(txcmd.param.index);
                     const ec_request_state_t sdo_state = ecrt_sdo_request_state(sdo_req);
                     const uint16_t value_size = kWriteSdoIndices.at(txcmd.param.index);
@@ -1145,14 +1253,14 @@ private:
                     axis_params_set = true;
 
                     // Удаляем команду из очереди
-                    m_tx_queues[axis].pop_front();
+                    queue.pop_front();
 
-                    if(! m_tx_queues[axis].size()) {
+                    if(! queue.size()) {
                         break;
                     }
 
                     // Если следующая команда - установка параметра оси, то пытаемся ее обработать
-                    txcmd = m_tx_queues[axis].front();
+                    txcmd = queue.front();
                     if (TXCmd::kSetParams != txcmd.type) {
                         break;
                     }
@@ -1167,8 +1275,22 @@ private:
                 assert(false);
             }
         }
+    }
 
-        ++cycles_cur;
+    void sync_time() {
+        // Устанавливаем application-time
+        ecrt_master_application_time(m_master, get_app_time());
+
+        // Добавляем команды на синхронизацию времени
+        ecrt_master_sync_reference_clock(m_master);
+        ecrt_master_sync_slave_clocks(m_master);
+        // ВАЖНО: Кладет в очередь отправки запрос на получение от дочерних узлов значение регистра их оффсета от SystemTime.
+        ecrt_master_sync_monitor_queue(m_master);
+    }
+
+    void send_datagrams() {
+        ecrt_domain_queue(m_domain);
+        ecrt_master_send(m_master);
     }
 
     bool check_axis_params(const AxisParams& params) {
@@ -1232,10 +1354,10 @@ private:
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    enum OperationMode : uint8_t {
+    enum OperationMode : uint16_t {
         OP_MODE_INVALID = 255,
 
-        OP_MODE_IDLE = 0,
+        OP_MODE_NOT_SET = 0,
         OP_MODE_POINT = 1,
         OP_MODE_SCAN = 3
     };
@@ -1295,16 +1417,22 @@ private:
 
     mutable std::mutex              m_mutex;
 
-    std::list<TXCmd>                m_tx_queues[AXIS_COUNT]; //!< Очереди команд по осям
-    const TXCmd                     kTxCmdIdle = {OP_MODE_IDLE, 0x6, 0, 0};
+    std::list<TXCmd>                m_tx_emerg_queues[AXIS_COUNT];  //!< Emergency queues split by axis
+    std::list<TXCmd>                m_tx_queues[AXIS_COUNT];        //!< Transmit queues split by axis
+    const TXCmd                     kTxCmdInit     = {OP_MODE_NOT_SET, 0x6, 0, 0};
+    const TXCmd                     kTxCmdIdle      = {OP_MODE_NOT_SET, 0x7, 0, 0};
+    const TXCmd                     kTxCmdEnable    = {OP_MODE_NOT_SET, 0xF, 0, 0};
+    const TXCmd                     kTxCmdDisable   = {OP_MODE_NOT_SET, 0x0, 0, 0};
+    const TXCmd                     kTxCmdResetError = {OP_MODE_NOT_SET, 0x80, 0, 0};
 
     //! Структуры для обмена данными по EtherCAT
-    ec_master_t*                    m_master;
-    ec_master_state_t               m_master_state;
-    ec_domain_t*                    m_domain;
-    ec_domain_state_t               m_domain_state;
-    uint8_t*                        m_domain_data;
-    ec_slave_config_t*              m_slave_cfg[AXIS_COUNT];
+    ec_master_t*                    m_master = nullptr;
+    ec_master_state_t               m_master_state = {0, 0, 0};
+    ec_domain_t*                    m_domain = nullptr;
+    ec_domain_state_t               m_domain_state = {0, EC_WC_ZERO, 0};
+    uint8_t*                        m_domain_data = nullptr;
+    ec_slave_config_t*              m_slave_cfg[AXIS_COUNT] = {nullptr, nullptr};
+    ec_slave_config_state_t         m_slave_cfg_states[AXIS_COUNT] {{0, 0 , 0}, {0, 0, 0}};
 
     ec_sdo_request_t*               m_temperature_sdo[AXIS_COUNT][3];
 
@@ -1381,10 +1509,6 @@ bool Control::SetPosAbsPulseOffset(const Axis& axis, int32_t offset) {
     return m_pimpl->SetPosAbsPulseOffset(axis, offset);
 }
 
-bool Control::SetModeRun(const Axis& axis, double pos, double vel) {
-    return m_pimpl->SetModeRun(axis, pos, vel);
-}
-
 bool Control::AddMoveMode(const Axis& axis, const MoveMode& mode, const AxisParams& params) {
     return m_pimpl->AddMoveMode(axis, mode, params);
 }
@@ -1401,8 +1525,32 @@ bool Control::SetAxisParams(const Axis& axis, const AxisParams& params) {
     return m_pimpl->SetAxisParams(axis, params);
 }
 
-bool Control::SetModeIdle(const Axis& axis) {
-    return m_pimpl->SetModeIdle(axis);
+bool Control::IsOperational() const {
+    return m_pimpl->IsOperational();
+}
+
+bool Control::RunToPoint(const Axis& axis, double pos) {
+    return m_pimpl->SetModeRun(axis, pos, 0.0);
+}
+
+bool Control::RunAtVelocity(const Axis& axis, double vel) {
+    return m_pimpl->SetModeRun(axis, 0.0, vel);
+}
+
+bool Control::Enable(const Axis& axis) {
+    return m_pimpl->Enable(axis);
+}
+
+bool Control::Disable(const Axis& axis) {
+    return m_pimpl->Disable(axis);
+}
+
+bool Control::Stop(const Axis& axis) {
+    return m_pimpl->Stop(axis);
+}
+
+bool Control::Idle(const Axis& axis) {
+    return m_pimpl->Idle(axis);
 }
 
 bool Control::ResetFault(const Axis& axis) {

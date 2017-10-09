@@ -17,13 +17,6 @@
         }\
     }
 
-#define LOG_TRACE(messages) LOG(messages, trace)
-#define LOG_DEBUG(messages) LOG(messages, debug)
-#define LOG_INFO(messages) LOG(messages, info)
-#define LOG_WARN(messages) LOG(messages, warning)
-#define LOG_ERROR(messages) LOG(messages, error)
-#define LOG_FATAL(messages) LOG(messages, fatal)
-
 namespace common {
 
 std::string DefaultLogFormat();
@@ -62,12 +55,11 @@ inline std::basic_istream<TChar, TTraits>& operator>>(std::basic_istream<TChar, 
 
 #define LOG(messages, level)
 
+#endif
+
 #define LOG_TRACE(messages) LOG(messages, trace)
 #define LOG_DEBUG(messages) LOG(messages, debug)
 #define LOG_INFO(messages)  LOG(messages, info)
 #define LOG_WARN(messages)  LOG(messages, warning)
 #define LOG_ERROR(messages) LOG(messages, error)
 #define LOG_FATAL(messages) LOG(messages, fatal)
-
-#endif
-

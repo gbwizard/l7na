@@ -25,18 +25,28 @@ struct Command {
     Drives::Axis axis;
     double pos;
     double vel;
+    bool disable;
     bool idle;
+    bool enable;
+    bool stop;
     bool reset;
     bool update_params;
+    bool gopoint;
+    bool govel;
     Drives::AxisParams params;
 
     Command()
         : axis(Drives::AZIMUTH_AXIS)
         , pos(0.0)
         , vel(0.0)
+        , disable(false)
         , idle(false)
+        , enable(false)
+        , stop(false)
         , reset(false)
         , update_params(false)
+        , gopoint(false)
+        , govel(false)
         , params()
     {}
 
@@ -44,9 +54,14 @@ struct Command {
         axis = Drives::AZIMUTH_AXIS;
         pos = 0.0;
         vel = 0.0;
+        disable = false;
         idle = false;
+        enable = false;
+        stop = false;
         reset = false;
         update_params = false;
+        gopoint = false;
+        govel = false;
         params.clear();
     }
 };
@@ -75,6 +90,7 @@ bool parse_args(const std::string& cmd_str, Command& result) {
                 return false;
             }
 
+            result.govel = true;
             result.vel = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "p") {
             if (cmd_vec.size() < 3) {
@@ -82,6 +98,7 @@ bool parse_args(const std::string& cmd_str, Command& result) {
                 return false;
             }
 
+            result.gopoint = true;
             result.pos = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "u") {
             if (cmd_vec.size() < 4 || cmd_vec.size() % 2 != 0) {
@@ -108,6 +125,12 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             result.idle = true;
         } else if (cmd_vec[1] == "r") {
             result.reset = true;
+        } else if (cmd_vec[1] == "e") {
+            result.enable = true;
+        } else if (cmd_vec[1] == "d") {
+            result.disable = true;
+        } else if (cmd_vec[1] == "s") {
+            result.stop = true;
         }
     } else if (cmd_vec[0] == "e") {
         result.axis = Drives::ELEVATION_AXIS;
@@ -122,7 +145,16 @@ bool parse_args(const std::string& cmd_str, Command& result) {
                 return false;
             }
 
+            result.govel = true;
             result.vel = std::atof(cmd_vec[2].c_str());
+        } else if (cmd_vec[1] == "p") {
+            if (cmd_vec.size() < 3) {
+                std::cerr << "Invalid input for command 'e p'" << std::endl;
+                return false;
+            }
+
+            result.gopoint = true;
+            result.pos = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "u") {
             if (cmd_vec.size() < 4 || cmd_vec.size() % 2 != 0) {
                 std::cerr << "Invalid input for command 'e u'" << std::endl;
@@ -144,23 +176,21 @@ bool parse_args(const std::string& cmd_str, Command& result) {
             }
 
             result.update_params = true;
-        } else if (cmd_vec[1] == "p") {
-            if (cmd_vec.size() < 3) {
-                std::cerr << "Invalid input for command 'e p'" << std::endl;
-                return false;
-            }
-
-            result.pos = std::atof(cmd_vec[2].c_str());
         } else if (cmd_vec[1] == "i") {
             result.idle = true;
         } else if (cmd_vec[1] == "r") {
             result.reset = true;
+        } else if (cmd_vec[1] == "e") {
+            result.enable = true;
+        } else if (cmd_vec[1] == "d") {
+            result.disable = true;
+        } else if (cmd_vec[1] == "s") {
+            result.stop = true;
         }
     } else {
         std::cerr << "Invalid input" << std::endl;
         return false;
     }
-
 
     return true;
 }
@@ -192,7 +222,7 @@ void print_status(const Drives::SystemStatus& status, std::ostream& os) {
 }
 
 void print_status_cerr(const Drives::SystemStatus& status, const Drives::CycleTimeInfo& timing_info) {
-    std::cerr << "System > state: " << status.state << " dcsync: " << status.dcsync
+    std::cerr << "System > state: " << Drives::GetSystemStateName(status.state) << " dcsync: " << status.dcsync
               << std::endl << "\t"
               << "apptime                   : " << status.apptime << std::hex << " = 0x" << status.apptime << std::dec
               << std::endl << "\t"
@@ -206,7 +236,7 @@ void print_status_cerr(const Drives::SystemStatus& status, const Drives::CycleTi
               << std::endl;
 
     for (int32_t axis = Drives::AXIS_MIN; axis < Drives::AXIS_COUNT; ++axis) {
-        std::cerr << "Axis " << axis << " > state: " << status.axes[axis].state << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
+        std::cerr << "Axis " << axis << " > state: " << Drives::GetAxisStateName(status.axes[axis].state) << " statusword: " << std::hex << "0x" << status.axes[axis].statusword << " ctrlword: 0x" << status.axes[axis].ctrlword
                   << std::dec << " mode: " << status.axes[axis].mode
                   << std::endl << "\t"
                   << " cur/dmd/tgt_pos_deg     = " << status.axes[axis].cur_pos_deg << "/" << status.axes[axis].dmd_pos_deg << "/" << status.axes[axis].tgt_pos_deg
@@ -242,6 +272,10 @@ void print_available_commands() {
     std::cerr << kLevelIndent << "a|e v <vel>       - set (a)zimuth or (e)levation drive to 'scan' mode with <vel> velocity [pulses/sec]" << std::endl;
     std::cerr << kLevelIndent << "a|e p <pos>       - set (a)zimuth or (e)levation drive to 'point' mode with <pos> position [pulses]" << std::endl;
     std::cerr << kLevelIndent << "a|e r             - reset (a)zimuth or (e)levation drive fault state" << std::endl;
+    std::cerr << kLevelIndent << "a|e e             - make (a)zimuth or (e)levation drive go to (e)nabled state" << std::endl;
+    std::cerr << kLevelIndent << "a|e i             - make (a)zimuth or (e)levation drive go to (i)dle state" << std::endl;
+    std::cerr << kLevelIndent << "a|e s             - make (a)zimuth or (e)levation drive go to (s)top state" << std::endl;
+    std::cerr << kLevelIndent << "a|e d             - make (a)zimuth or (e)levation drive go to (d)isabled state" << std::endl;
     std::cerr << kLevelIndent << "a|e u <idx> <val> - set (a)zimuth or (e)levation drive parameter" << std::endl;
 }
 
@@ -326,13 +360,7 @@ int main(int argc, char* argv[]) {
     const std::atomic<Drives::CycleTimeInfo>& timing_info = control.GetCycleTimeInfoRef();
 
     std::cerr << "Waiting for system initialization..." << std::endl;
-
-    while (1) {
-        const Drives::SystemStatus sys_status_copy = sys_status.load(std::memory_order_acquire);
-        if ((Drives::AxisState::AXIS_IDLE == sys_status_copy.axes[0].state)
-            && (Drives::AxisState::AXIS_IDLE == sys_status_copy.axes[1].state)) {
-            break;
-        }
+    while (! control.IsOperational()) {
         boost::this_thread::sleep_for(boost::chrono::milliseconds(500));
     }
     std::cerr << "System is ready" << std::endl;
@@ -370,18 +398,32 @@ int main(int argc, char* argv[]) {
 
         // Команда будет передана, только если флаг соответствующий двигателю будет установлен.
         if (cmd.idle) {
-            control.SetModeIdle(cmd.axis);
+            control.Idle(cmd.axis);
+        } else if (cmd.stop) {
+            control.Stop(cmd.axis);
+        } else if (cmd.enable) {
+            control.Enable(cmd.axis);
+        } else if (cmd.disable) {
+            control.Disable(cmd.axis);
         } else if (cmd.reset) {
             control.ResetFault(cmd.axis);
         } else if (cmd.update_params) {
             control.SetAxisParams(cmd.axis, cmd.params);
-        } else {
-            control.SetModeRun(cmd.axis, cmd.pos, cmd.vel);
+        } else if (cmd.gopoint) {
+            control.RunToPoint(cmd.axis, cmd.pos);
+        } else if (cmd.govel) {
+            control.RunAtVelocity(cmd.axis, cmd.vel);
         }
 
         std::cerr << "Command axis: " << cmd.axis
                   << " pos: " << cmd.pos
                   << " vel: " << cmd.vel
+                  << " gopoint: " << cmd.gopoint
+                  << " govel: " << cmd.govel
+                  << " idle: " << cmd.idle
+                  << " stop: " << cmd.stop
+                  << " disable: " << cmd.disable
+                  << " enable: " << cmd.enable
                   << " idle: " << cmd.idle
                   << " reset: " << cmd.reset
                   << " update_params: " << cmd.update_params
