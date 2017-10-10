@@ -117,7 +117,7 @@ AxisStatus::AxisStatus()
     , cur_temperature2(0)
     , ctrlword(0)
     , statusword(0)
-    , mode(0)
+    , mode(OP_MODE_NOT_SET)
 {}
 
 SystemStatus::SystemStatus() noexcept
@@ -1075,7 +1075,7 @@ private:
             sys.axes[axis].cur_torq = EC_READ_S16(m_domain_data + m_offro_act_torq[axis]);
             sys.axes[axis].ctrlword = EC_READ_U16(m_domain_data + m_offrw_ctrl[axis]);
             sys.axes[axis].statusword = EC_READ_U16(m_domain_data + m_offro_status[axis]);
-            sys.axes[axis].mode = EC_READ_S8(m_domain_data + m_offrw_act_mode[axis]);
+            sys.axes[axis].mode = OperationMode(EC_READ_S8(m_domain_data + m_offrw_act_mode[axis]));
 
             sys.axes[axis].state = compute_axis_state(sys.axes[axis].statusword);
             sys.axes[axis].error_code = EC_READ_U16(m_domain_data + m_offro_err_code[axis]);
@@ -1354,14 +1354,6 @@ private:
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    enum OperationMode : uint16_t {
-        OP_MODE_INVALID = 255,
-
-        OP_MODE_NOT_SET = 0,
-        OP_MODE_POINT = 1,
-        OP_MODE_SCAN = 3
-    };
-
     struct TXCmd {
         enum Type : int8_t {
             kTypeUnknown = -1,
@@ -1389,7 +1381,7 @@ private:
         int32_t tgt_pos = 0;
         int32_t tgt_vel = 0;
         uint16_t ctrlword = 0;
-        OperationMode op_mode = OP_MODE_INVALID;
+        OperationMode op_mode = OP_MODE_NOT_SET;
         Type type = kTypeUnknown;
         AxisParam param = {0,0};
     };

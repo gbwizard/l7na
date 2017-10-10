@@ -45,6 +45,13 @@ enum ParamsMode : int16_t {
  */
 using MoveMode = uint16_t;
 
+//! @brief Drive opertaion mode (point, scan, etc)
+enum OperationMode : uint16_t {
+    OP_MODE_NOT_SET = 0,
+    OP_MODE_POINT = 1,
+    OP_MODE_SCAN = 3
+};
+
 //! @brief Текущие значения для одной оси системы
 struct AxisStatus {
     AxisStatus();
@@ -72,7 +79,7 @@ struct AxisStatus {
     int32_t     cur_temperature2;       //!< Текущая температура для сервоусилителя 2
     uint16_t    ctrlword;               //!< Битовая маска управления приводом (для отладки)
     uint16_t    statusword;             //!< Битовая маска текущего состояния привода (для отладки)
-    uint16_t    mode;                   //!< Текущий режим работы (для отладки)
+    OperationMode mode;                 //!< Текущий режим работы (для отладки)
     MoveMode    move_mode;
     ParamsMode  params_mode;
 };
