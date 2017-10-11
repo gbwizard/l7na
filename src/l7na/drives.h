@@ -121,6 +121,41 @@ public:
      */
     bool IsOperational() const;
 
+    /*! @brief В зависимости от значений параметров, задает разные режимы работы двигателей по осям (позиционирование в точку или сканирование).
+     *
+     *  Соответственно для каждой оси:
+     *  if (velocity == 0) {
+     *      Позиционирование в точку;
+     *  } else {
+     *      Вращение с указанной скоростью;
+     *  }
+     *
+     *  Для азимута:
+     *  if (velocity > 0) {
+     *      Вращение _по_ часовой стрелке;
+     *  } else {
+     *      Вращение _против_ часовой стрелки;
+     *  }
+     *
+     *  Для угла места:
+     *  if (velocity > 0) {
+     *      Вращение поднимающее антенну;
+     *  } else {
+     *      Вращение опускающее антенну;
+     *  }
+     *
+     *  @attention В режиме позиционирования в точку при достижении указанной позиции двигатели фиксируют положение
+     *  фиксированным моментом (задаваемым в настройках).
+     *
+     *  @param  axis                Идентификатор двигателя
+     *  @param  pos                 Фиксированный позиция, в которую перемещается двигатель [градусы]
+     *  @param  vel                 Скорость, с которой двигатель вращается в режиме постоянной скорости
+     *                              (это НЕ скорость с которой он перемещается в заданную позицию) [градусы/с]
+     *
+     *  @return                     Флаг успешности операции
+     */
+    bool SetModeRun(const Axis& axis, double pos /*deg*/, double vel /*deg/s*/);
+
     /*! @brief Move the drive to the specified point
      *
      *  @attention In thismode after the target position reached drives are holding the positing using
@@ -132,7 +167,6 @@ public:
      *  @return         Operation success flag
      */
     bool RunToPoint(const Axis& axis, double pos /*deg*/);
-
 
     /*! @brief Move the drive to the specified point
      *
@@ -230,7 +264,7 @@ public:
 
 private:
     class Impl;
-    std::unique_ptr<Impl> m_pimpl;
+    Impl * m_pimpl = nullptr;
 };
 
 } // namespaces

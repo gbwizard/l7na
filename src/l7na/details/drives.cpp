@@ -1495,6 +1495,7 @@ Control::Control(const Config::Storage& config, const ParamsMode params_mode /*=
 {}
 
 Control::~Control() {
+    delete m_pimpl;
 }
 
 bool Control::SetPosAbsPulseOffset(const Axis& axis, int32_t offset) {
@@ -1519,6 +1520,11 @@ bool Control::SetAxisParams(const Axis& axis, const AxisParams& params) {
 
 bool Control::IsOperational() const {
     return m_pimpl->IsOperational();
+}
+
+bool Control::SetModeRun(const Axis &axis, double pos, double vel)
+{
+    return m_pimpl->SetModeRun(axis, pos, vel);
 }
 
 bool Control::RunToPoint(const Axis& axis, double pos) {
